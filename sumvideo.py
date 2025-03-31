@@ -28,6 +28,18 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ title }}</title>
+    
+    <!-- Open Graph metadata for rich previews -->
+    <meta property="og:title" content="{{ title }}">
+    <meta property="og:type" content="video.other">
+    <meta property="og:description" content="{{ short_description }}">
+    {% if og_image_data_url %}
+    <meta property="og:image" content="{{ og_image_data_url }}">
+    {% endif %}
+    <meta property="og:site_name" content="SumVideo Archive">
+    <meta property="og:video" content="{{ video_data_url if is_standalone else video_filename }}">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:creator" content="{{ uploader }}">
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -259,6 +271,27 @@ def get_file_as_base64(file_path: str) -> str:
     with open(file_path, 'rb') as file:
         return base64.b64encode(file.read()).decode('utf-8')
 
+def get_image_mime_type(file_path: str) -> str:
+    """
+    Determine the MIME type of an image based on its extension.
+    
+    Args:
+        file_path: Path to the image file
+        
+    Returns:
+        MIME type string for the image
+    """
+    ext = os.path.splitext(file_path)[1].lower()
+    mime_types = {
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.png': 'image/png',
+        '.gif': 'image/gif',
+        '.webp': 'image/webp',
+        '.bmp': 'image/bmp',
+    }
+    return mime_types.get(ext, 'image/jpeg')  # Default to JPEG if unknown
+
 def create_html(metadata: Dict[str, Any], video_path: str, output_dir: str, standalone: bool = False) -> str:
     """
     Create an HTML description page for the video.
@@ -278,6 +311,11 @@ def create_html(metadata: Dict[str, Any], video_path: str, output_dir: str, stan
     upload_date = format_date(metadata.get('upload_date', ''))
     description = metadata.get('description', '')
     webpage_url = metadata.get('webpage_url', '')
+    
+    # Create a shortened description for OG metadata
+    short_description = description
+    if description and len(description) > 150:
+        short_description = description[:150] + '...'
     
     # Get video filename and MIME type
     video_filename = os.path.basename(video_path)
@@ -300,9 +338,27 @@ def create_html(metadata: Dict[str, Any], video_path: str, output_dir: str, stan
     file_extension = os.path.splitext(video_filename)[1][1:]  # Remove the dot
     video_mimetype = get_mime_type(file_extension)
     
-    # Prepare data for standalone mode
+    # Prepare data for standalone mode and rich previews
     video_data_url = ""
     json_data_base64 = ""
+    og_image_data_url = ""
+    
+    # Find thumbnail image for OG metadata (for both standalone and normal mode)
+    thumbnail_path = None
+    base_filename = os.path.splitext(video_filename)[0]
+    
+    # Check for common image extensions
+    for ext in ['.jpg', '.jpeg', '.png', '.webp']:
+        potential_thumbnail = os.path.join(output_dir, base_filename + ext)
+        if os.path.exists(potential_thumbnail):
+            thumbnail_path = potential_thumbnail
+            break
+    
+    # If thumbnail found, create data URL for OG image
+    if thumbnail_path:
+        thumbnail_mime = get_image_mime_type(thumbnail_path)
+        thumbnail_base64 = get_file_as_base64(thumbnail_path)
+        og_image_data_url = f"data:{thumbnail_mime};base64,{thumbnail_base64}"
     
     if standalone:
         # Find and read the video file
@@ -345,6 +401,7 @@ def create_html(metadata: Dict[str, Any], video_path: str, output_dir: str, stan
         uploader=uploader,
         upload_date=upload_date,
         description=description,
+        short_description=short_description,
         webpage_url=webpage_url,
         video_filename=url_safe_filename,
         video_mimetype=video_mimetype,
@@ -352,7 +409,8 @@ def create_html(metadata: Dict[str, Any], video_path: str, output_dir: str, stan
         is_standalone=standalone,
         video_data_url=video_data_url,
         json_data_base64=json_data_base64,
-        html_filename=slug  # Add html_filename without extension
+        html_filename=slug,  # HTML filename without extension
+        og_image_data_url=og_image_data_url  # Thumbnail for rich previews
     )
     
     # Write the HTML file
