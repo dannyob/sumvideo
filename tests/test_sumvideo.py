@@ -14,6 +14,9 @@ import unittest
 import importlib.util
 from pathlib import Path
 import tempfile
+import base64
+import json
+import re
 
 
 class TestSumVideo(unittest.TestCase):
@@ -33,6 +36,7 @@ class TestSumVideo(unittest.TestCase):
         cls.create_html = module.create_html
         cls.format_date = module.format_date
         cls.get_mime_type = module.get_mime_type
+        cls.get_file_as_base64 = module.get_file_as_base64
         cls.HTML_TEMPLATE = module.HTML_TEMPLATE
 
     def setUp(self):
@@ -93,6 +97,46 @@ class TestSumVideo(unittest.TestCase):
         self.assertEqual(TestSumVideo.get_mime_type('mp4'), 'video/mp4')
         self.assertEqual(TestSumVideo.get_mime_type('webm'), 'video/webm')
         self.assertEqual(TestSumVideo.get_mime_type('unknown'), 'video/mp4')  # Default
+        
+    def test_standalone_mode(self):
+        """Test that standalone mode embeds video and JSON data correctly."""
+        # Create a JSON metadata file
+        json_path = os.path.join(self.output_dir, 'Test Video with &amp; symbol.info.json')
+        with open(json_path, 'w', encoding='utf-8') as f:
+            json.dump(self.sample_metadata, f)
+            
+        # Write some content to the video file
+        with open(self.video_path, 'wb') as f:
+            f.write(b'test video content')
+            
+        # Create HTML with standalone mode
+        html_path = TestSumVideo.create_html(self.sample_metadata, self.video_path, self.output_dir, standalone=True)
+        
+        # Read the HTML content
+        with open(html_path, 'r', encoding='utf-8') as f:
+            html_content = f.read()
+        
+        # Check that video data is embedded
+        self.assertIn('data:video/mp4;base64,', html_content)
+        
+        # Check that JSON data is embedded
+        json_match = re.search(r'atob\("([^"]+)"\)', html_content)
+        self.assertIsNotNone(json_match, "JSON base64 data not found in HTML")
+        
+        # Decode and verify JSON content
+        if json_match:
+            base64_data = json_match.group(1)
+            try:
+                decoded_json = base64.b64decode(base64_data).decode('utf-8')
+                json_data = json.loads(decoded_json)
+                self.assertEqual(json_data['title'], self.sample_metadata['title'])
+            except:
+                self.fail("Failed to decode embedded JSON data")
+        
+        # Check for download buttons
+        self.assertIn('downloadVideo()', html_content)
+        self.assertIn('downloadJSON()', html_content)
+        self.assertIn('class="download-button"', html_content)
 
 
 if __name__ == '__main__':
