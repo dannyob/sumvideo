@@ -393,8 +393,7 @@ def main():
     parser.add_argument('-o', '--output-dir', default=None, help='Directory to save the video and HTML files')
     parser.add_argument('-f', '--format', default='mp4', help='Video format to download (mp4, webm, etc.)')
     parser.add_argument('--standalone', action='store_true', help='Create a standalone HTML file with embedded video and metadata')
-    parser.add_argument('--cleanup', action='store_true', help='Remove original files after creating the HTML (in standalone mode: removes video, JSON, and thumbnail; in normal mode: removes JSON and thumbnail only)')
-    parser.add_argument('--keep-all', action='store_true', help='Keep all downloaded files (overrides --cleanup)')
+    parser.add_argument('--keep-all', action='store_true', help='Keep all downloaded files (default is to clean up)')
     args = parser.parse_args()
     
     # Determine output directory
@@ -465,8 +464,9 @@ def main():
     print("Creating HTML description page...")
     html_path = create_html(metadata, video_path, output_dir, args.standalone)
     
-    # Clean up files if requested
-    if args.cleanup and not args.keep_all:
+    # Determine if we should clean up files (default is yes, unless --keep-all is specified)
+    should_cleanup = not args.keep_all
+    if should_cleanup:
         files_to_remove = []
         
         # In standalone mode, we can remove the video file because it's embedded in HTML
@@ -510,18 +510,24 @@ def main():
                     print(f"  Failed to remove {os.path.basename(file_path)}: {e}")
     
     print("\nDone!")
-    if not (args.cleanup and args.standalone and not args.keep_all):
+    if not (should_cleanup and args.standalone):
         print(f"Video saved to: {video_path}")
     print(f"HTML page saved to: {html_path}")
     
     if args.standalone:
         print("Created standalone HTML file with embedded video and metadata.")
-        if args.cleanup and not args.keep_all:
-            print("Original files have been removed as requested.")
+        if should_cleanup:
+            print("Original files have been removed automatically.")
             print("You can extract the video and JSON from the HTML page using the download buttons.")
         else:
+            print("Original files kept (--keep-all).")
             print("You can open the HTML page in your browser to view the video and download the original files.")
     else:
+        if should_cleanup:
+            print("JSON and thumbnail files have been removed automatically, but video file is preserved.")
+            print("Use --keep-all to keep all downloaded files.")
+        else:
+            print("All original files kept (--keep-all).")
         print("You can open the HTML page in your browser to view the video and its metadata.")
 
 if __name__ == "__main__":
