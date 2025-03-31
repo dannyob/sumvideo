@@ -393,6 +393,8 @@ def main():
     parser.add_argument('-o', '--output-dir', default=None, help='Directory to save the video and HTML files')
     parser.add_argument('-f', '--format', default='mp4', help='Video format to download (mp4, webm, etc.)')
     parser.add_argument('--standalone', action='store_true', help='Create a standalone HTML file with embedded video and metadata')
+    parser.add_argument('--cleanup', action='store_true', help='Remove original files after creating the HTML (in standalone mode: removes video, JSON, and thumbnail; in normal mode: removes JSON and thumbnail only)')
+    parser.add_argument('--keep-all', action='store_true', help='Keep all downloaded files (overrides --cleanup)')
     args = parser.parse_args()
     
     # Determine output directory
@@ -463,13 +465,62 @@ def main():
     print("Creating HTML description page...")
     html_path = create_html(metadata, video_path, output_dir, args.standalone)
     
+    # Clean up files if requested
+    if args.cleanup and not args.keep_all:
+        files_to_remove = []
+        
+        # In standalone mode, we can remove the video file because it's embedded in HTML
+        if args.standalone:
+            if actual_video_path and os.path.exists(actual_video_path):
+                files_to_remove.append(actual_video_path)
+            elif os.path.exists(new_video_path):
+                files_to_remove.append(new_video_path)
+        
+        # Always remove JSON and thumbnail files in cleanup mode
+        for file in os.listdir(output_dir):
+            file_path = os.path.join(output_dir, file)
+            
+            # Skip directories and the HTML file we just created
+            if os.path.isdir(file_path) or file == os.path.basename(html_path):
+                continue
+                
+            # Check if it's a JSON file related to our video
+            if file.endswith(".info.json") and (
+                file.startswith(short_slug) or  # New filename format
+                (actual_video_filename and file.startswith(os.path.splitext(actual_video_filename)[0]))  # Original filename
+            ):
+                files_to_remove.append(file_path)
+                
+            # Check if it's a thumbnail related to our video
+            for ext in ['.jpg', '.png', '.webp']:
+                if file.endswith(ext) and (
+                    file.startswith(short_slug) or  # New filename format
+                    (actual_video_filename and file.startswith(os.path.splitext(actual_video_filename)[0]))  # Original filename
+                ):
+                    files_to_remove.append(file_path)
+        
+        # Remove the files
+        if files_to_remove:
+            print("\nCleaning up downloaded files...")
+            for file_path in files_to_remove:
+                try:
+                    os.remove(file_path)
+                    print(f"  Removed: {os.path.basename(file_path)}")
+                except OSError as e:
+                    print(f"  Failed to remove {os.path.basename(file_path)}: {e}")
+    
     print("\nDone!")
-    print(f"Video saved to: {video_path}")
+    if not (args.cleanup and args.standalone and not args.keep_all):
+        print(f"Video saved to: {video_path}")
     print(f"HTML page saved to: {html_path}")
     
     if args.standalone:
         print("Created standalone HTML file with embedded video and metadata.")
-        print("You can open the HTML page in your browser to view the video and download the original files.")
+        if args.cleanup and not args.keep_all:
+            print("Original files have been removed as requested.")
+            print("You can extract the video and JSON from the HTML page using the download buttons.")
+        else:
+            print("You can open the HTML page in your browser to view the video and download the original files.")
     else:
         print("You can open the HTML page in your browser to view the video and its metadata.")
 
