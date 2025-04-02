@@ -13,13 +13,29 @@ import sys
 import argparse
 import base64
 import json
+import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List, Union
 
 from jinja2 import Environment, FileSystemLoader
 from slugify import slugify
 import yt_dlp
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger('sumvideo')
+
+# Constants
+VIDEO_EXTENSIONS = ['mp4', 'webm', 'ogg', 'mov']
+IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp']
+MAX_TITLE_LENGTH = 40
+MAX_DESCRIPTION_LENGTH = 150
+DEFAULT_VIDEO_FORMAT = 'mp4'
 
 # HTML template for the description page
 HTML_TEMPLATE = """<!DOCTYPE html>
@@ -37,7 +53,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     <meta property="og:image" content="{{ og_image_data_url }}">
     {% endif %}
     <meta property="og:site_name" content="SumVideo Archive">
-    <meta property="og:video" content="{{ video_data_url if is_standalone else video_filename }}">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:creator" content="{{ uploader }}">
     <style>
@@ -140,17 +155,18 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         {% endif %}
     </div>
     
+    <div class="source">
+        <p>Original source: <a href="{{ webpage_url }}" target="_blank">{{ webpage_url }}</a></p>
+    </div>
+    
+   
     <div class="video-container">
         <video id="video-player" controls>
             <source src="{{ video_data_url if is_standalone else video_filename }}" type="{{ video_mimetype }}">
             Your browser does not support the video tag.
         </video>
     </div>
-    
-    <div class="source">
-        <p>Original source: <a href="{{ webpage_url }}" target="_blank">{{ webpage_url }}</a></p>
-    </div>
-    
+
     {% if is_standalone %}
     <div class="download-section">
         <p><strong>Download Files:</strong></p>
@@ -158,7 +174,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <button class="download-button" onclick="downloadJSON()">Download JSON Metadata</button>
     </div>
     {% endif %}
-    
+ 
     <div class="archive-note">
         <p>This is an archived copy of the original content, saved on {{ archive_date }}.</p>
         {% if is_standalone %}
@@ -187,8 +203,11 @@ def generate_short_slug(title: str, upload_date: Optional[str] = None) -> str:
     Returns:
         Shortened slug suitable for filenames
     """
-    # Truncate title to a reasonable length (max 40 chars)
-    short_title = title[:40].strip()
+    if not title:
+        title = "untitled"
+        
+    # Truncate title to a reasonable length
+    short_title = title[:MAX_TITLE_LENGTH].strip()
     
     # Remove trailing ellipsis if present
     if short_title.endswith('...'):
@@ -196,7 +215,7 @@ def generate_short_slug(title: str, upload_date: Optional[str] = None) -> str:
     
     # Add unique identifier based on upload date if available
     unique_suffix = ''
-    if upload_date:
+    if upload_date and len(upload_date) >= 4:
         # Use just the last 4 digits of upload date for uniqueness
         unique_suffix = f"-{upload_date[-4:]}"
     
@@ -204,7 +223,15 @@ def generate_short_slug(title: str, upload_date: Optional[str] = None) -> str:
     return slugify(short_title) + unique_suffix
 
 def get_mime_type(file_extension: str) -> str:
-    """Return the MIME type based on file extension."""
+    """
+    Return the MIME type based on file extension.
+    
+    Args:
+        file_extension: The extension of the file (without dot)
+        
+    Returns:
+        MIME type string for the video format
+    """
     mime_types = {
         'mp4': 'video/mp4',
         'webm': 'video/webm',
@@ -213,7 +240,7 @@ def get_mime_type(file_extension: str) -> str:
     }
     return mime_types.get(file_extension.lower(), 'video/mp4')
 
-def download_video(url: str, output_dir: str, format: str = "mp4") -> Optional[Dict[str, Any]]:
+def download_video(url: str, output_dir: Union[str, Path], format: str = DEFAULT_VIDEO_FORMAT) -> Optional[Dict[str, Any]]:
     """
     Download a video using yt-dlp and return its metadata.
     
@@ -242,46 +269,58 @@ def download_video(url: str, output_dir: str, format: str = "mp4") -> Optional[D
     
     try:
         # Download the video
+        logger.info(f"Downloading video from {url} to {output_path}")
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             result = ydl.extract_info(url, download=True)
             
             if result is None:
-                print(f"Error: Could not extract information from {url}")
+                logger.error(f"Could not extract information from {url}")
                 return None
                 
-            # Return the metadata
+            logger.info(f"Successfully downloaded video: {result.get('title', 'Unknown')}")
             return result
     except yt_dlp.utils.DownloadError as e:
-        print(f"Error downloading video: {e}")
+        logger.error(f"Error downloading video: {e}")
         return None
     except Exception as e:
-        print(f"An unexpected error occurred: {e}")
+        logger.error(f"An unexpected error occurred: {e}", exc_info=True)
         return None
 
-def get_file_as_base64(file_path: str) -> str:
+def get_file_as_base64(file_path: Union[str, Path]) -> str:
     """
     Convert file content to base64 string.
     
     Args:
-        file_path: Path to the file
+        file_path: Path to the file (string or Path object)
         
     Returns:
         Base64 encoded string of file content
+        
+    Raises:
+        IOError: If file cannot be read
     """
-    with open(file_path, 'rb') as file:
-        return base64.b64encode(file.read()).decode('utf-8')
+    path_obj = Path(file_path) if isinstance(file_path, str) else file_path
+    
+    try:
+        with path_obj.open('rb') as file:
+            return base64.b64encode(file.read()).decode('utf-8')
+    except (IOError, OSError) as e:
+        logger.error(f"Failed to read file for base64 encoding: {path_obj} - {e}")
+        raise
 
-def get_image_mime_type(file_path: str) -> str:
+def get_image_mime_type(file_path: Union[str, Path]) -> str:
     """
     Determine the MIME type of an image based on its extension.
     
     Args:
-        file_path: Path to the image file
+        file_path: Path to the image file (string or Path object)
         
     Returns:
         MIME type string for the image
     """
-    ext = os.path.splitext(file_path)[1].lower()
+    path_obj = Path(file_path) if isinstance(file_path, str) else file_path
+    ext = path_obj.suffix.lower()
+    
     mime_types = {
         '.jpg': 'image/jpeg',
         '.jpeg': 'image/jpeg',
@@ -292,7 +331,8 @@ def get_image_mime_type(file_path: str) -> str:
     }
     return mime_types.get(ext, 'image/jpeg')  # Default to JPEG if unknown
 
-def create_html(metadata: Dict[str, Any], video_path: str, output_dir: str, standalone: bool = False) -> str:
+def create_html(metadata: Dict[str, Any], video_path: Union[str, Path], output_dir: Union[str, Path], 
+              standalone: bool = False) -> str:
     """
     Create an HTML description page for the video.
     
@@ -305,6 +345,10 @@ def create_html(metadata: Dict[str, Any], video_path: str, output_dir: str, stan
     Returns:
         Path to the created HTML file
     """
+    # Convert paths to Path objects
+    video_path_obj = Path(video_path) if isinstance(video_path, str) else video_path
+    output_dir_obj = Path(output_dir) if isinstance(output_dir, str) else output_dir
+    
     # Extract relevant metadata
     title = metadata.get('title', 'Untitled Video')
     uploader = metadata.get('uploader', 'Unknown')
@@ -314,28 +358,26 @@ def create_html(metadata: Dict[str, Any], video_path: str, output_dir: str, stan
     
     # Create a shortened description for OG metadata
     short_description = description
-    if description and len(description) > 150:
-        short_description = description[:150] + '...'
+    if description and len(description) > MAX_DESCRIPTION_LENGTH:
+        short_description = description[:MAX_DESCRIPTION_LENGTH] + '...'
     
     # Get video filename and MIME type
-    video_filename = os.path.basename(video_path)
+    video_filename = video_path_obj.name
     
-    # Find the actual filename in the output directory as it may have been modified
-    # during download (special characters replaced, etc.)
-    actual_filename = None
-    for file in os.listdir(output_dir):
-        if file.endswith(f".{metadata.get('ext', 'mp4')}") and not file.endswith(".info.json"):
-            actual_filename = file
-            break
+    # Find the actual filename in the output directory if needed
+    video_ext = metadata.get('ext', DEFAULT_VIDEO_FORMAT)
+    video_files = list(output_dir_obj.glob(f"*.{video_ext}"))
+    video_files = [f for f in video_files if not f.name.endswith(".info.json")]
     
-    if actual_filename:
-        video_filename = actual_filename
+    if video_files and video_path_obj.name != video_files[0].name:
+        video_filename = video_files[0].name
     
     # URL encode the filename to handle special characters in HTML
     from urllib.parse import quote
     url_safe_filename = quote(video_filename)
     
-    file_extension = os.path.splitext(video_filename)[1][1:]  # Remove the dot
+    # Get the file extension and MIME type
+    file_extension = video_path_obj.suffix[1:]  # Remove the dot
     video_mimetype = get_mime_type(file_extension)
     
     # Prepare data for standalone mode and rich previews
@@ -343,47 +385,51 @@ def create_html(metadata: Dict[str, Any], video_path: str, output_dir: str, stan
     json_data_base64 = ""
     og_image_data_url = ""
     
-    # Find thumbnail image for OG metadata (for both standalone and normal mode)
-    thumbnail_path = None
-    base_filename = os.path.splitext(video_filename)[0]
-    
-    # Check for common image extensions
-    for ext in ['.jpg', '.jpeg', '.png', '.webp']:
-        potential_thumbnail = os.path.join(output_dir, base_filename + ext)
-        if os.path.exists(potential_thumbnail):
-            thumbnail_path = potential_thumbnail
-            break
+    # Find thumbnail image for OG metadata using our helper function
+    base_filename = video_path_obj.stem
+    image_exts = [ext[1:] if ext.startswith('.') else ext for ext in IMAGE_EXTENSIONS]
+    thumbnail_files = find_files_by_extension(output_dir_obj, base_filename, image_exts)
     
     # If thumbnail found, create data URL for OG image
-    if thumbnail_path:
-        thumbnail_mime = get_image_mime_type(thumbnail_path)
-        thumbnail_base64 = get_file_as_base64(thumbnail_path)
-        og_image_data_url = f"data:{thumbnail_mime};base64,{thumbnail_base64}"
+    if thumbnail_files:
+        thumbnail_path = thumbnail_files[0]
+        try:
+            thumbnail_mime = get_image_mime_type(thumbnail_path)
+            thumbnail_base64 = get_file_as_base64(thumbnail_path)
+            og_image_data_url = f"data:{thumbnail_mime};base64,{thumbnail_base64}"
+        except Exception as e:
+            logger.error(f"Error creating thumbnail data URL: {e}")
     
     if standalone:
-        # Find and read the video file
-        video_file_path = os.path.join(output_dir, video_filename)
-        video_base64 = get_file_as_base64(video_file_path)
-        video_data_url = f"data:{video_mimetype};base64,{video_base64}"
-        
-        # Find and read the JSON metadata file
-        json_file_path = None
-        for file in os.listdir(output_dir):
-            if file.endswith(".info.json") and file.startswith(os.path.splitext(video_filename)[0]):
-                json_file_path = os.path.join(output_dir, file)
-                break
-        
-        if json_file_path:
-            with open(json_file_path, 'r', encoding='utf-8') as f:
-                # Load and pretty-print the JSON data with indentation
-                json_data = json.loads(f.read())
-                formatted_json = json.dumps(json_data, indent=2)
-                json_data_base64 = base64.b64encode(formatted_json.encode('utf-8')).decode('utf-8')
+        try:
+            # Find and read the video file
+            video_file_path = output_dir_obj / video_filename
+            if video_file_path.exists():
+                video_base64 = get_file_as_base64(video_file_path)
+                video_data_url = f"data:{video_mimetype};base64,{video_base64}"
+            else:
+                logger.warning(f"Video file not found for standalone mode: {video_file_path}")
+            
+            # Find and read the JSON metadata file
+            json_files = list(output_dir_obj.glob(f"{base_filename}.info.json"))
+            
+            if json_files:
+                json_file_path = json_files[0]
+                try:
+                    # Load and pretty-print the JSON data with indentation
+                    json_content = json_file_path.read_text(encoding='utf-8')
+                    json_data = json.loads(json_content)
+                    formatted_json = json.dumps(json_data, indent=2)
+                    json_data_base64 = base64.b64encode(formatted_json.encode('utf-8')).decode('utf-8')
+                except Exception as e:
+                    logger.error(f"Error processing JSON file: {e}")
+        except Exception as e:
+            logger.error(f"Error preparing standalone data: {e}", exc_info=True)
     
     # Generate a shorter, meaningful slug for the filename
     slug = generate_short_slug(title, metadata.get('upload_date'))
     html_filename = f"{slug}.html"
-    html_path = os.path.join(output_dir, html_filename)
+    html_path = output_dir_obj / html_filename
     
     # Create Jinja2 environment and template
     # Disable autoescape to prevent double-escaping of HTML entities
@@ -414,12 +460,43 @@ def create_html(metadata: Dict[str, Any], video_path: str, output_dir: str, stan
     )
     
     # Write the HTML file
-    with open(html_path, 'w', encoding='utf-8') as f:
-        f.write(html_content)
+    try:
+        html_path.write_text(html_content, encoding='utf-8')
+        logger.info(f"Created HTML file: {html_path}")
+    except Exception as e:
+        logger.error(f"Error writing HTML file: {e}")
     
-    return html_path
+    return str(html_path)
 
-def get_default_output_dir() -> str:
+def find_files_by_extension(directory: Union[str, Path], base_name: str, extensions: List[str]) -> List[Path]:
+    """
+    Find files with a specific base name and extensions in a directory.
+    
+    Args:
+        directory: Directory to search in
+        base_name: Base name of the files to find
+        extensions: List of extensions to search for (with or without dot)
+        
+    Returns:
+        List of Path objects for the found files
+    """
+    dir_path = Path(directory) if isinstance(directory, str) else directory
+    found_files = []
+    
+    # Normalize extensions to include the dot
+    normalized_exts = [ext if ext.startswith('.') else f'.{ext}' for ext in extensions]
+    
+    try:
+        for ext in normalized_exts:
+            potential_file = dir_path / f"{base_name}{ext}"
+            if potential_file.exists():
+                found_files.append(potential_file)
+    except Exception as e:
+        logger.error(f"Error searching for files: {e}")
+    
+    return found_files
+
+def get_default_output_dir() -> Path:
     """
     Determine the default output directory for videos.
     
@@ -432,37 +509,61 @@ def get_default_output_dir() -> str:
     # Check for XDG_VIDEOS_DIR
     xdg_videos_dir = os.environ.get('XDG_VIDEOS_DIR')
     if xdg_videos_dir:
-        return xdg_videos_dir
+        result = Path(xdg_videos_dir)
+        result.mkdir(parents=True, exist_ok=True)
+        return result
     
     # Check for SUMVIDEO_DIR
     sumvideo_dir = os.environ.get('SUMVIDEO_DIR')
     if sumvideo_dir:
-        return sumvideo_dir
+        result = Path(sumvideo_dir)
+        result.mkdir(parents=True, exist_ok=True)
+        return result
     
     # Use current working directory with 'videos' subdirectory
     default_dir = Path.cwd() / 'videos'
     default_dir.mkdir(parents=True, exist_ok=True)
-    return str(default_dir)
+    return default_dir
 
 def main():
     # Parse command-line arguments
-    parser = argparse.ArgumentParser(description='Download a video and create an HTML description page.')
+    parser = argparse.ArgumentParser(
+        description='Download a video and create an HTML description page.',
+        epilog='''
+Examples:
+  sumvideo.py https://www.youtube.com/watch?v=dQw4w9WgXcQ
+  sumvideo.py --standalone https://twitter.com/username/status/123456789
+  sumvideo.py -o ~/Videos -f webm https://vimeo.com/123456789
+        '''
+    )
     parser.add_argument('url', help='URL of the video to download')
-    parser.add_argument('-o', '--output-dir', default=None, help='Directory to save the video and HTML files')
-    parser.add_argument('-f', '--format', default='mp4', help='Video format to download (mp4, webm, etc.)')
-    parser.add_argument('--standalone', action='store_true', help='Create a standalone HTML file with embedded video and metadata')
-    parser.add_argument('--keep-all', action='store_true', help='Keep all downloaded files (default is to clean up)')
+    parser.add_argument('-o', '--output-dir', default=None, 
+                      help='Directory to save the video and HTML files')
+    parser.add_argument('-f', '--format', default=DEFAULT_VIDEO_FORMAT, 
+                      help=f'Video format to download ({", ".join(VIDEO_EXTENSIONS)})')
+    parser.add_argument('--standalone', action='store_true', 
+                      help='Create a standalone HTML file with embedded video and metadata')
+    parser.add_argument('--keep-all', action='store_true', 
+                      help='Keep all downloaded files (default is to clean up)')
+    parser.add_argument('-v', '--verbose', action='store_true', 
+                      help='Enable verbose logging')
     args = parser.parse_args()
     
+    # Set logging level based on verbose flag
+    if args.verbose:
+        logger.setLevel(logging.DEBUG)
+        logger.debug("Verbose logging enabled")
+    
     # Determine output directory
-    output_dir = args.output_dir if args.output_dir else get_default_output_dir()
+    output_dir = Path(args.output_dir) if args.output_dir else get_default_output_dir()
+    output_dir.mkdir(parents=True, exist_ok=True)
     
     # Download the video
-    print(f"Downloading video from {args.url}...")
+    logger.info(f"Downloading video from {args.url}...")
     metadata = download_video(args.url, output_dir, args.format)
     
     if metadata is None:
-        print("Download failed. Exiting.")
+        logger.error("Download failed. Exiting.")
         sys.exit(1)
     
     # Get the video title from metadata
@@ -473,54 +574,65 @@ def main():
     new_video_filename = f"{short_slug}.{args.format}"
     
     # Define the path for the renamed video file
-    new_video_path = os.path.join(output_dir, new_video_filename)
+    new_video_path = output_dir / new_video_filename
     
-    # Find the actual downloaded file (handling any modifications made by yt-dlp)
+    # Find the actual downloaded file using glob instead of manual search
+    video_files = list(output_dir.glob(f"*.{args.format}"))
+    
+    # Filter out any .info.json files that might be incorrectly matched
+    video_files = [f for f in video_files if not f.name.endswith(".info.json")]
+    
+    # Find the actual video file
     actual_video_path = None
-    actual_video_filename = None
     
-    for file in os.listdir(output_dir):
-        # Skip directories and non-video files
-        if os.path.isdir(os.path.join(output_dir, file)) or not file.endswith(f".{args.format}"):
-            continue
-        # Skip .info.json files or any other non-video files
-        if file.endswith(".info.json") or "." + args.format not in file:
-            continue
-        # This is likely our video file
-        actual_video_path = os.path.join(output_dir, file)
-        actual_video_filename = file
-        break
+    if video_files:
+        actual_video_path = video_files[0]
     
     # Rename the video file and its associated files if found
-    if actual_video_path and actual_video_filename != new_video_filename:
-        # Rename video file
-        os.rename(actual_video_path, new_video_path)
-        
-        # Also rename the .info.json file if it exists
-        json_filename = os.path.splitext(actual_video_filename)[0] + ".info.json"
-        json_path = os.path.join(output_dir, json_filename)
-        if os.path.exists(json_path):
-            new_json_path = os.path.join(output_dir, f"{short_slug}.info.json")
-            os.rename(json_path, new_json_path)
-        
-        # And rename the thumbnail if it exists (common extensions)
-        for ext in ['.jpg', '.png', '.webp']:
-            thumb_filename = os.path.splitext(actual_video_filename)[0] + ext
-            thumb_path = os.path.join(output_dir, thumb_filename)
-            if os.path.exists(thumb_path):
-                new_thumb_path = os.path.join(output_dir, f"{short_slug}{ext}")
-                os.rename(thumb_path, new_thumb_path)
-                break
-        
-        # Update the video path for HTML generation
-        video_path = new_video_path
+    if actual_video_path and actual_video_path.name != new_video_filename:
+        try:
+            logger.debug(f"Renaming video file from {actual_video_path} to {new_video_path}")
+            
+            # Rename video file
+            actual_video_path.rename(new_video_path)
+            
+            # Get the base filename without extension
+            original_base = actual_video_path.stem
+            
+            # Find and rename the .info.json file if it exists
+            json_files = list(output_dir.glob(f"{original_base}.info.json"))
+            if json_files:
+                json_path = json_files[0]
+                new_json_path = output_dir / f"{short_slug}.info.json"
+                logger.debug(f"Renaming JSON file from {json_path} to {new_json_path}")
+                json_path.rename(new_json_path)
+            
+            # Find and rename thumbnail files
+            # Use our helper function to find image files with the original base name
+            image_files = find_files_by_extension(output_dir, original_base, 
+                                               [ext[1:] if ext.startswith('.') else ext for ext in IMAGE_EXTENSIONS])
+            
+            # Rename found thumbnails
+            for thumb_path in image_files:
+                new_thumb_path = output_dir / f"{short_slug}{thumb_path.suffix}"
+                logger.debug(f"Renaming thumbnail from {thumb_path} to {new_thumb_path}")
+                thumb_path.rename(new_thumb_path)
+            
+            # Update the video path for HTML generation
+            video_path = new_video_path
+            
+        except OSError as e:
+            logger.error(f"Error renaming files: {e}")
+            # Use the original path if renaming failed
+            video_path = actual_video_path
     else:
-        # Use the original path if we couldn't find the file or rename failed
-        video_path = actual_video_path or os.path.join(output_dir, new_video_filename)
+        # Use the original path if we couldn't find the file or rename wasn't needed
+        video_path = actual_video_path or (output_dir / new_video_filename)
     
     # Create the HTML description page
-    print("Creating HTML description page...")
-    html_path = create_html(metadata, video_path, output_dir, args.standalone)
+    logger.info("Creating HTML description page...")
+    html_path = create_html(metadata, str(video_path), str(output_dir), args.standalone)
+    html_path = Path(html_path)  # Convert back to Path object
     
     # Determine if we should clean up files (default is yes, unless --keep-all is specified)
     should_cleanup = not args.keep_all
@@ -529,48 +641,56 @@ def main():
         
         # In standalone mode, we can remove the video file because it's embedded in HTML
         if args.standalone:
-            if actual_video_path and os.path.exists(actual_video_path):
-                files_to_remove.append(actual_video_path)
-            elif os.path.exists(new_video_path):
-                files_to_remove.append(new_video_path)
+            # Try to find video files to remove
+            video_files = list(output_dir.glob(f"*.{args.format}"))
+            for video_file in video_files:
+                if video_file.exists():
+                    files_to_remove.append(video_file)
         
-        # Always remove JSON and thumbnail files in cleanup mode
-        for file in os.listdir(output_dir):
-            file_path = os.path.join(output_dir, file)
-            
-            # Skip directories and the HTML file we just created
-            if os.path.isdir(file_path) or file == os.path.basename(html_path):
-                continue
-                
-            # Check if it's a JSON file related to our video
-            if file.endswith(".info.json") and (
-                file.startswith(short_slug) or  # New filename format
-                (actual_video_filename and file.startswith(os.path.splitext(actual_video_filename)[0]))  # Original filename
-            ):
-                files_to_remove.append(file_path)
-                
-            # Check if it's a thumbnail related to our video
-            for ext in ['.jpg', '.png', '.webp']:
-                if file.endswith(ext) and (
-                    file.startswith(short_slug) or  # New filename format
-                    (actual_video_filename and file.startswith(os.path.splitext(actual_video_filename)[0]))  # Original filename
-                ):
-                    files_to_remove.append(file_path)
+        # Get the base names we need to check against
+        original_base = actual_video_path.stem if actual_video_path else None
+        new_base = short_slug
+        
+        # Find JSON files to remove
+        if original_base:
+            json_files = list(output_dir.glob(f"{original_base}.info.json"))
+            files_to_remove.extend(json_files)
+        
+        json_files = list(output_dir.glob(f"{new_base}.info.json"))
+        files_to_remove.extend(json_files)
+        
+        # Find thumbnail files to remove
+        for base in [original_base, new_base]:
+            if base:
+                for ext in IMAGE_EXTENSIONS:
+                    ext_clean = ext[1:] if ext.startswith('.') else ext
+                    image_files = list(output_dir.glob(f"{base}.{ext_clean}"))
+                    files_to_remove.extend(image_files)
+                    image_files = list(output_dir.glob(f"{base}.{ext_clean.upper()}"))
+                    files_to_remove.extend(image_files)
+        
+        # Filter out the HTML file we just created and remove duplicates
+        files_to_remove = [f for f in files_to_remove if f != html_path]
+        files_to_remove = list(set(files_to_remove))  # Remove duplicates
         
         # Remove the files
         if files_to_remove:
-            print("\nCleaning up downloaded files...")
+            logger.info("Cleaning up downloaded files...")
             for file_path in files_to_remove:
                 try:
-                    os.remove(file_path)
-                    print(f"  Removed: {os.path.basename(file_path)}")
+                    file_path.unlink()
+                    logger.info(f"Removed: {file_path.name}")
                 except OSError as e:
-                    print(f"  Failed to remove {os.path.basename(file_path)}: {e}")
+                    logger.error(f"Failed to remove {file_path.name}: {e}")
     
-    print("\nDone!")
+    logger.info("Done!")
     if not (should_cleanup and args.standalone):
-        print(f"Video saved to: {video_path}")
-    print(f"HTML page saved to: {html_path}")
+        logger.info(f"Video saved to: {video_path}")
+    logger.info(f"HTML page saved to: {html_path}")
+    
+    # Print final status for user
+    print(f"\nSuccessfully downloaded and processed: {video_title}")
+    print(f"HTML page created: {html_path}")
     
     if args.standalone:
         print("Created standalone HTML file with embedded video and metadata.")
