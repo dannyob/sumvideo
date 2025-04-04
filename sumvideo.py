@@ -16,7 +16,7 @@ import json
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, Optional, List, Union
+from typing import Dict, Any, Optional, Union
 
 from jinja2 import Environment, FileSystemLoader
 from slugify import slugify
@@ -364,14 +364,6 @@ def create_html(metadata: Dict[str, Any], video_path: Union[str, Path], output_d
     # Get video filename and MIME type
     video_filename = video_path_obj.name
     
-    # Find the actual filename in the output directory if needed
-    video_ext = metadata.get('ext', DEFAULT_VIDEO_FORMAT)
-    video_files = list(output_dir_obj.glob(f"*.{video_ext}"))
-    video_files = [f for f in video_files if not f.name.endswith(".info.json")]
-    
-    if video_files and video_path_obj.name != video_files[0].name:
-        video_filename = video_files[0].name
-    
     # URL encode the filename to handle special characters in HTML
     from urllib.parse import quote
     url_safe_filename = quote(video_filename)
@@ -385,14 +377,33 @@ def create_html(metadata: Dict[str, Any], video_path: Union[str, Path], output_d
     json_data_base64 = ""
     og_image_data_url = ""
     
-    # Find thumbnail image for OG metadata using our helper function
+    # Get the base filename for associated files (without extension)
     base_filename = video_path_obj.stem
-    image_exts = [ext[1:] if ext.startswith('.') else ext for ext in IMAGE_EXTENSIONS]
-    thumbnail_files = find_files_by_extension(output_dir_obj, base_filename, image_exts)
+    
+    # Get thumbnail path directly from metadata if available
+    thumbnail_path = None
+    if 'thumbnail' in metadata and metadata['thumbnail']:
+        thumbnail_str = str(metadata['thumbnail'])
+        potential_thumbnail = Path(thumbnail_str)
+        if potential_thumbnail.exists():
+            thumbnail_path = potential_thumbnail
+        else:
+            # Try to find the thumbnail in the output directory with the same filename
+            potential_thumbnail = output_dir_obj / Path(thumbnail_str).name
+            if potential_thumbnail.exists():
+                thumbnail_path = potential_thumbnail
+    
+    # If no thumbnail path from metadata, try to derive it from yt-dlp naming pattern
+    if not thumbnail_path:
+        # yt-dlp typically names the thumbnail with the same base name as the video
+        for ext in ['.jpg', '.jpeg', '.png', '.webp']:
+            potential_path = output_dir_obj / f"{base_filename}{ext}"
+            if potential_path.exists():
+                thumbnail_path = potential_path
+                break
     
     # If thumbnail found, create data URL for OG image
-    if thumbnail_files:
-        thumbnail_path = thumbnail_files[0]
+    if thumbnail_path:
         try:
             thumbnail_mime = get_image_mime_type(thumbnail_path)
             thumbnail_base64 = get_file_as_base64(thumbnail_path)
@@ -402,19 +413,17 @@ def create_html(metadata: Dict[str, Any], video_path: Union[str, Path], output_d
     
     if standalone:
         try:
-            # Find and read the video file
-            video_file_path = output_dir_obj / video_filename
-            if video_file_path.exists():
-                video_base64 = get_file_as_base64(video_file_path)
+            # Use the exact video path provided rather than searching
+            if video_path_obj.exists():
+                video_base64 = get_file_as_base64(video_path_obj)
                 video_data_url = f"data:{video_mimetype};base64,{video_base64}"
             else:
-                logger.warning(f"Video file not found for standalone mode: {video_file_path}")
+                logger.warning(f"Video file not found for standalone mode: {video_path_obj}")
             
-            # Find and read the JSON metadata file
-            json_files = list(output_dir_obj.glob(f"{base_filename}.info.json"))
+            # Get JSON path derived from metadata
+            json_file_path = output_dir_obj / f"{base_filename}.info.json"
             
-            if json_files:
-                json_file_path = json_files[0]
+            if json_file_path.exists():
                 try:
                     # Load and pretty-print the JSON data with indentation
                     json_content = json_file_path.read_text(encoding='utf-8')
@@ -468,33 +477,8 @@ def create_html(metadata: Dict[str, Any], video_path: Union[str, Path], output_d
     
     return str(html_path)
 
-def find_files_by_extension(directory: Union[str, Path], base_name: str, extensions: List[str]) -> List[Path]:
-    """
-    Find files with a specific base name and extensions in a directory.
-    
-    Args:
-        directory: Directory to search in
-        base_name: Base name of the files to find
-        extensions: List of extensions to search for (with or without dot)
-        
-    Returns:
-        List of Path objects for the found files
-    """
-    dir_path = Path(directory) if isinstance(directory, str) else directory
-    found_files = []
-    
-    # Normalize extensions to include the dot
-    normalized_exts = [ext if ext.startswith('.') else f'.{ext}' for ext in extensions]
-    
-    try:
-        for ext in normalized_exts:
-            potential_file = dir_path / f"{base_name}{ext}"
-            if potential_file.exists():
-                found_files.append(potential_file)
-    except Exception as e:
-        logger.error(f"Error searching for files: {e}")
-    
-    return found_files
+# This function has been removed as we now directly derive filenames from yt-dlp output
+# rather than searching for files by extension
 
 def get_default_output_dir() -> Path:
     """
@@ -588,46 +572,65 @@ Examples:
     if video_files:
         actual_video_path = video_files[0]
     
-    # Rename the video file and its associated files if found
-    if actual_video_path and actual_video_path.name != new_video_filename:
+    # Get the actual downloaded file path from the metadata
+    video_path = None
+    if 'requested_downloads' in metadata and metadata['requested_downloads']:
+        # yt-dlp stores the actual downloaded filepath in the requested_downloads
+        for download in metadata['requested_downloads']:
+            if 'filepath' in download and Path(download['filepath']).exists():
+                actual_video_path = Path(download['filepath'])
+                logger.debug(f"Found video path from metadata: {actual_video_path}")
+                video_path = actual_video_path
+                break
+    
+    # Fallback to searching if not found in metadata
+    if not video_path:
+        # Find the downloaded file in the output directory
+        video_ext = metadata.get('ext', args.format)
+        video_files = list(output_dir.glob(f"*.{video_ext}"))
+        # Filter out any .info.json files that might be incorrectly matched
+        video_files = [f for f in video_files if not f.name.endswith(".info.json")]
+        
+        if video_files:
+            actual_video_path = video_files[0]
+            video_path = actual_video_path
+        else:
+            # Last resort: use the expected filename
+            video_path = output_dir / f"{metadata.get('title', 'video')}.{args.format}"
+    
+    # Rename files to use the slug if they're not already using it
+    if video_path and video_path.name != new_video_filename:
         try:
-            logger.debug(f"Renaming video file from {actual_video_path} to {new_video_path}")
+            logger.debug(f"Renaming video file from {video_path} to {new_video_path}")
+            
+            # Get the base filename without extension before renaming
+            original_base = video_path.stem
             
             # Rename video file
-            actual_video_path.rename(new_video_path)
+            video_path.rename(new_video_path)
             
-            # Get the base filename without extension
-            original_base = actual_video_path.stem
-            
-            # Find and rename the .info.json file if it exists
-            json_files = list(output_dir.glob(f"{original_base}.info.json"))
-            if json_files:
-                json_path = json_files[0]
+            # Find and rename the JSON metadata file
+            json_path = output_dir / f"{original_base}.info.json"
+            if json_path.exists():
                 new_json_path = output_dir / f"{short_slug}.info.json"
                 logger.debug(f"Renaming JSON file from {json_path} to {new_json_path}")
                 json_path.rename(new_json_path)
             
-            # Find and rename thumbnail files
-            # Use our helper function to find image files with the original base name
-            image_files = find_files_by_extension(output_dir, original_base, 
-                                               [ext[1:] if ext.startswith('.') else ext for ext in IMAGE_EXTENSIONS])
-            
-            # Rename found thumbnails
-            for thumb_path in image_files:
-                new_thumb_path = output_dir / f"{short_slug}{thumb_path.suffix}"
-                logger.debug(f"Renaming thumbnail from {thumb_path} to {new_thumb_path}")
-                thumb_path.rename(new_thumb_path)
+            # Find and rename thumbnail file based on yt-dlp's naming convention
+            for ext in ['.jpg', '.jpeg', '.png', '.webp']:
+                thumb_path = output_dir / f"{original_base}{ext}"
+                if thumb_path.exists():
+                    new_thumb_path = output_dir / f"{short_slug}{ext}"
+                    logger.debug(f"Renaming thumbnail from {thumb_path} to {new_thumb_path}")
+                    thumb_path.rename(new_thumb_path)
             
             # Update the video path for HTML generation
             video_path = new_video_path
             
         except OSError as e:
             logger.error(f"Error renaming files: {e}")
-            # Use the original path if renaming failed
-            video_path = actual_video_path
-    else:
-        # Use the original path if we couldn't find the file or rename wasn't needed
-        video_path = actual_video_path or (output_dir / new_video_filename)
+            # If renaming failed, the original path is now invalid, so use the new path
+            video_path = new_video_path if new_video_path.exists() else video_path
     
     # Create the HTML description page
     logger.info("Creating HTML description page...")
@@ -640,35 +643,34 @@ Examples:
         files_to_remove = []
         
         # In standalone mode, we can remove the video file because it's embedded in HTML
-        if args.standalone:
-            # Try to find video files to remove
-            video_files = list(output_dir.glob(f"*.{args.format}"))
-            for video_file in video_files:
-                if video_file.exists():
-                    files_to_remove.append(video_file)
+        if args.standalone and new_video_path.exists():
+            files_to_remove.append(new_video_path)
         
-        # Get the base names we need to check against
-        original_base = actual_video_path.stem if actual_video_path else None
-        new_base = short_slug
+        # JSON metadata file using the slugified name
+        json_path = output_dir / f"{short_slug}.info.json"
+        if json_path.exists():
+            files_to_remove.append(json_path)
         
-        # Find JSON files to remove
-        if original_base:
-            json_files = list(output_dir.glob(f"{original_base}.info.json"))
-            files_to_remove.extend(json_files)
+        # Thumbnail file based on yt-dlp's naming convention
+        for ext in ['.jpg', '.jpeg', '.png', '.webp']:
+            thumb_path = output_dir / f"{short_slug}{ext}"
+            if thumb_path.exists():
+                files_to_remove.append(thumb_path)
+                
+        # Also check for uppercase extensions that might be used by yt-dlp
+        for ext in ['.JPG', '.JPEG', '.PNG', '.WEBP']:
+            thumb_path = output_dir / f"{short_slug}{ext}"
+            if thumb_path.exists():
+                files_to_remove.append(thumb_path)
         
-        json_files = list(output_dir.glob(f"{new_base}.info.json"))
-        files_to_remove.extend(json_files)
-        
-        # Find thumbnail files to remove
-        for base in [original_base, new_base]:
-            if base:
-                for ext in IMAGE_EXTENSIONS:
-                    ext_clean = ext[1:] if ext.startswith('.') else ext
-                    image_files = list(output_dir.glob(f"{base}.{ext_clean}"))
-                    files_to_remove.extend(image_files)
-                    image_files = list(output_dir.glob(f"{base}.{ext_clean.upper()}"))
-                    files_to_remove.extend(image_files)
-        
+        # Handle thumbnail files that might be stored with the full video id
+        if 'id' in metadata:
+            video_id = metadata['id']
+            for ext in ['.jpg', '.jpeg', '.png', '.webp', '.JPG', '.JPEG', '.PNG', '.WEBP']:
+                thumb_path = output_dir / f"{video_id}{ext}"
+                if thumb_path.exists():
+                    files_to_remove.append(thumb_path)
+                    
         # Filter out the HTML file we just created and remove duplicates
         files_to_remove = [f for f in files_to_remove if f != html_path]
         files_to_remove = list(set(files_to_remove))  # Remove duplicates
