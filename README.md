@@ -151,4 +151,4 @@ SumVideo uses the following Python packages:
 
 ## License
 
-[Add your license information here]
+GPLv3
