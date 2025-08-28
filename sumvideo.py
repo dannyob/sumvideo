@@ -146,6 +146,13 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 <body>
     <h1>{{ title }}</h1>
     
+    <div class="video-container">
+        <video id="video-player" controls>
+            <source src="{{ video_data_url if is_standalone else video_filename }}" type="{{ video_mimetype }}">
+            Your browser does not support the video tag. Dagnabbit!
+        </video>
+    </div>
+
     <div class="metadata">
         <p><strong>Creator:</strong> {{ uploader }}</p>
         <p><strong>Published:</strong> {{ upload_date }}</p>
@@ -158,15 +165,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     <div class="source">
         <p>Original source: <a href="{{ webpage_url }}" target="_blank">{{ webpage_url }}</a></p>
     </div>
-    
-   
-    <div class="video-container">
-        <video id="video-player" controls>
-            <source src="{{ video_data_url if is_standalone else video_filename }}" type="{{ video_mimetype }}">
-            Your browser does not support the video tag.
-        </video>
-    </div>
-
     {% if is_standalone %}
     <div class="download-section">
         <p><strong>Download Files:</strong></p>
