@@ -165,6 +165,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     <div class="source">
         <p>Original source: <a href="{{ webpage_url }}" target="_blank">{{ webpage_url }}</a></p>
     </div>
+ 
     {% if is_standalone %}
     <div class="download-section">
         <p><strong>Download Files:</strong></p>
@@ -173,6 +174,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     </div>
     {% endif %}
  
+
     <div class="archive-note">
         <p>This is an archived copy of the original content, saved on {{ archive_date }}.</p>
         {% if is_standalone %}
@@ -238,7 +240,7 @@ def get_mime_type(file_extension: str) -> str:
     }
     return mime_types.get(file_extension.lower(), 'video/mp4')
 
-def download_video(url: str, output_dir: Union[str, Path], format: str = DEFAULT_VIDEO_FORMAT) -> Optional[Dict[str, Any]]:
+def download_video(url: str, output_dir: Union[str, Path], format: str = DEFAULT_VIDEO_FORMAT, extra_opts: Optional[list] = None) -> Optional[Dict[str, Any]]:
     """
     Download a video using yt-dlp and return its metadata.
     
@@ -246,6 +248,7 @@ def download_video(url: str, output_dir: Union[str, Path], format: str = DEFAULT
         url: URL of the video to download
         output_dir: Directory to save the video
         format: Video format to download
+        extra_opts: Additional command line options to pass to yt-dlp
     
     Returns:
         Dictionary containing video metadata or None if download failed
@@ -264,6 +267,28 @@ def download_video(url: str, output_dir: Union[str, Path], format: str = DEFAULT
         'writethumbnail': True,
         'keepvideo': True,
     }
+    
+    # Process extra options passed from command line
+    if extra_opts:
+        # Parse extra options into yt-dlp format
+        i = 0
+        while i < len(extra_opts):
+            opt = extra_opts[i]
+            if opt.startswith('--'):
+                # Remove leading dashes and convert to underscore format
+                key = opt[2:].replace('-', '_')
+                
+                # Check if next argument is a value (doesn't start with --)
+                if i + 1 < len(extra_opts) and not extra_opts[i + 1].startswith('--'):
+                    value = extra_opts[i + 1]
+                    ydl_opts[key] = value
+                    i += 2
+                else:
+                    # Boolean flag
+                    ydl_opts[key] = True
+                    i += 1
+            else:
+                i += 1
     
     try:
         # Download the video
@@ -516,6 +541,10 @@ Examples:
   sumvideo.py https://www.youtube.com/watch?v=dQw4w9WgXcQ
   sumvideo.py --standalone https://twitter.com/username/status/123456789
   sumvideo.py -o ~/Videos -f webm https://vimeo.com/123456789
+  sumvideo.py https://example.com/video --quality best --extract-flat
+  sumvideo.py https://example.com/video -- --quality best --extract-flat
+
+Note: Unknown arguments or arguments after -- are passed to yt-dlp.
         '''
     )
     parser.add_argument('url', help='URL of the video to download')
@@ -529,7 +558,15 @@ Examples:
                       help='Keep all downloaded files (default is to clean up)')
     parser.add_argument('-v', '--verbose', action='store_true', 
                       help='Enable verbose logging')
-    args = parser.parse_args()
+    # Handle -- separator for yt-dlp arguments
+    if '--' in sys.argv:
+        separator_index = sys.argv.index('--')
+        sumvideo_args = sys.argv[1:separator_index]
+        ytdlp_args = sys.argv[separator_index + 1:]
+        args = parser.parse_args(sumvideo_args)
+        unknown_args = ytdlp_args
+    else:
+        args, unknown_args = parser.parse_known_args()
     
     # Set logging level based on verbose flag
     if args.verbose:
@@ -542,7 +579,9 @@ Examples:
     
     # Download the video
     logger.info(f"Downloading video from {args.url}...")
-    metadata = download_video(args.url, output_dir, args.format)
+    if unknown_args:
+        logger.debug(f"Passing unknown arguments to yt-dlp: {unknown_args}")
+    metadata = download_video(args.url, output_dir, args.format, unknown_args)
     
     if metadata is None:
         logger.error("Download failed. Exiting.")
