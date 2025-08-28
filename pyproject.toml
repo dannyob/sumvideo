@@ -1,0 +1,43 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sumvideo"
+version = "0.2.0"
+description = "A tool to convert videos via yt-dlp to local HTML pages that can be shared."
+authors = [
+    {name = "Danny O'Brien", email = "danny@spesh.com"},
+]
+readme = "README.md"
+license = {text = "GPL-3.0-or-later"}
+requires-python = ">=3.12"
+dependencies = [
+    "jinja2",
+    "yt-dlp", 
+    "python-slugify",
+]
+keywords = ["video", "download", "summary", "youtube"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Video",
+    "Topic :: Internet :: WWW/HTTP"
+]
+
+[project.scripts]
+sumvideo = "sumvideo:main"
+
+[project.urls]
+Homepage = "https://github.com/dannyob/sumvideo"
+Repository = "https://github.com/dannyob/sumvideo"
+Issues = "https://github.com/dannyob/sumvideo/issues"
+
+[tool.uv]
+dev-dependencies = [
+    "mypy",
+    "ruff",
+]
