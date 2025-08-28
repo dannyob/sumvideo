@@ -190,6 +190,38 @@ def format_date(date_str: str) -> str:
     except ValueError:
         return date_str
 
+def clean_title_hashtags(title: str) -> str:
+    """
+    Clean up title by removing hashtags while preserving meaningful content.
+    
+    Args:
+        title: Original title that may contain hashtags
+        
+    Returns:
+        Cleaned title with hashtags removed but main content preserved
+    """
+    if not title:
+        return title
+    
+    # Split by hashtags and take the part before the first hashtag
+    # This preserves the main content while removing social media tags
+    parts = title.split('#')
+    main_content = parts[0].strip()
+    
+    # If the main content is too short, it might be just emojis or very brief
+    # In that case, we might want to keep some context
+    if len(main_content.strip()) < 10 and len(parts) > 1:
+        # Look for the first meaningful hashtag that might be part of the content
+        for part in parts[1:]:
+            part = part.strip()
+            if part and not part.lower().startswith(('fyp', 'viral', 'trend', 'for', 'you')):
+                # Add back the first meaningful hashtag as it might be content-related
+                main_content = f"{main_content} #{part.split()[0]}"
+                break
+    
+    # Clean up extra whitespace and return
+    return main_content.strip() if main_content.strip() else title
+
 def generate_short_slug(title: str, upload_date: Optional[str] = None) -> str:
     """
     Generate a shortened, meaningful slug from a title with optional date suffix.
@@ -238,7 +270,8 @@ def get_mime_type(file_extension: str) -> str:
     }
     return mime_types.get(file_extension.lower(), 'video/mp4')
 
-def download_video(url: str, output_dir: Union[str, Path], format: str = DEFAULT_VIDEO_FORMAT) -> Optional[Dict[str, Any]]:
+def download_video(url: str, output_dir: Union[str, Path], format: str = DEFAULT_VIDEO_FORMAT, 
+                  cookies_from_browser: Optional[str] = None, cookies_file: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """
     Download a video using yt-dlp and return its metadata.
     
@@ -246,6 +279,8 @@ def download_video(url: str, output_dir: Union[str, Path], format: str = DEFAULT
         url: URL of the video to download
         output_dir: Directory to save the video
         format: Video format to download
+        cookies_from_browser: Browser to extract cookies from (chrome, firefox, safari, etc.)
+        cookies_file: Path to Netscape format cookie file
     
     Returns:
         Dictionary containing video metadata or None if download failed
@@ -264,6 +299,14 @@ def download_video(url: str, output_dir: Union[str, Path], format: str = DEFAULT
         'writethumbnail': True,
         'keepvideo': True,
     }
+    
+    # Add cookie options if provided
+    if cookies_from_browser:
+        ydl_opts['cookiesfrombrowser'] = (cookies_from_browser,)
+        logger.info(f"Using cookies from browser: {cookies_from_browser}")
+    elif cookies_file:
+        ydl_opts['cookiefile'] = cookies_file
+        logger.info(f"Using cookies from file: {cookies_file}")
     
     try:
         # Download the video
@@ -348,16 +391,32 @@ def create_html(metadata: Dict[str, Any], video_path: Union[str, Path], output_d
     output_dir_obj = Path(output_dir) if isinstance(output_dir, str) else output_dir
     
     # Extract relevant metadata
-    title = metadata.get('title', 'Untitled Video')
+    raw_title = metadata.get('title', 'Untitled Video')
+    description = metadata.get('description', '')
+    
+    # For truncated titles (ending with '...'), try to use description as title if it looks more complete
+    title = raw_title
+    if raw_title.endswith('...') and description and len(description.strip()) > len(raw_title):
+        # Use the description as the title, but clean it up
+        cleaned_desc = description.strip()
+        # If description is significantly longer and appears to contain the full content, use it
+        if len(cleaned_desc) > len(raw_title) + 10:  # At least 10 chars longer than truncated title
+            title = cleaned_desc
+    
+    # Clean up the title by removing hashtags while preserving the main content
+    title = clean_title_hashtags(title)
+    
     uploader = metadata.get('uploader', 'Unknown')
     upload_date = format_date(metadata.get('upload_date', ''))
-    description = metadata.get('description', '')
     webpage_url = metadata.get('webpage_url', '')
     
     # Create a shortened description for OG metadata
-    short_description = description
-    if description and len(description) > MAX_DESCRIPTION_LENGTH:
-        short_description = description[:MAX_DESCRIPTION_LENGTH] + '...'
+    # Only hide description if we actually used the full description as the title
+    # (not just when title was cleaned of hashtags)
+    display_description = '' if title == description else description
+    short_description = display_description
+    if display_description and len(display_description) > MAX_DESCRIPTION_LENGTH:
+        short_description = display_description[:MAX_DESCRIPTION_LENGTH] + '...'
     
     # Get video filename and MIME type
     video_filename = video_path_obj.name
@@ -453,7 +512,7 @@ def create_html(metadata: Dict[str, Any], video_path: Union[str, Path], output_d
         title=title,
         uploader=uploader,
         upload_date=upload_date,
-        description=description,
+        description=display_description,
         short_description=short_description,
         webpage_url=webpage_url,
         video_filename=url_safe_filename,
@@ -529,6 +588,10 @@ Examples:
                       help='Keep all downloaded files (default is to clean up)')
     parser.add_argument('-v', '--verbose', action='store_true', 
                       help='Enable verbose logging')
+    parser.add_argument('--cookies-from-browser', 
+                      help='Extract cookies from browser (chrome, firefox, safari, etc.)')
+    parser.add_argument('--cookies', 
+                      help='Path to Netscape format cookie file')
     args = parser.parse_args()
     
     # Set logging level based on verbose flag
@@ -542,7 +605,7 @@ Examples:
     
     # Download the video
     logger.info(f"Downloading video from {args.url}...")
-    metadata = download_video(args.url, output_dir, args.format)
+    metadata = download_video(args.url, output_dir, args.format, args.cookies_from_browser, args.cookies)
     
     if metadata is None:
         logger.error("Download failed. Exiting.")
