@@ -16,7 +16,7 @@
 **Options:**
 - `-o, --output-dir OUTPUT_DIR` - Directory to save video and HTML files
 - `-f, --format FORMAT` - Video format (mp4, webm, ogg, mov) [default: mp4]
-- `--style STYLE` - Visual style for HTML page (bubblegum, default) [default: bubblegum]
+- `--style STYLE` - Visual style for HTML page (bubblegum, newyork, default) [default: bubblegum]
 - `--standalone` - Create standalone HTML with embedded video and metadata
 - `--keep-all` - Keep all downloaded files (default is to clean up JSON and thumbnails)
 - `-v, --verbose` - Enable verbose logging
@@ -73,7 +73,8 @@
   - `--keep-all` flag: Keeps everything
 - **Cookie Support**: Can extract cookies from browsers for authenticated downloads
 - **Modular Styling System**: Multiple visual styles available via `--style` argument
-  - **bubblegum** (default): Soft pastel colors, rounded corners, gradients, modern fonts
+  - **bubblegum** (default): Soft pastel colors, rounded corners, gradients, modern fonts (Poppins/Quicksand)
+  - **newyork**: Classic editorial style, serif typography (Merriweather/Lato), formal and elegant
   - **default**: Classic simple styling with minimal CSS
   - New styles can be easily added to the `STYLES` dictionary in `sumvideo.py`
 

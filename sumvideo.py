@@ -265,6 +265,173 @@ STYLE_BUBBLEGUM = """
         }
 """
 
+STYLE_NEWYORK = """
+        /* 📰 New Yorker Style - Classic, Elegant, Timeless */
+        @import url('https://fonts.googleapis.com/css2?family=Merriweather:wght@300;400;700&family=Lato:wght@400;700&display=swap');
+
+        :root {
+            --bg-primary: #f7f5f0;
+            --bg-secondary: #edeae3;
+            --color-accent: #2c2c2c;
+            --color-text: #1a1a1a;
+            --color-text-light: #666;
+            --color-border: #d0d0d0;
+            --color-link: #c41e3a;
+            --color-link-hover: #8b1428;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Merriweather', Georgia, serif;
+            line-height: 1.8;
+            max-width: 680px;
+            margin: 0 auto;
+            padding: 60px 40px;
+            background: var(--bg-primary);
+            color: var(--color-text);
+            font-weight: 300;
+            font-size: 17px;
+        }
+
+        h1 {
+            font-family: 'Lato', 'Helvetica Neue', sans-serif;
+            font-weight: 700;
+            font-size: 1.5em;
+            line-height: 1.25;
+            margin: 0 0 0.5em 0;
+            color: var(--color-accent);
+            letter-spacing: -0.02em;
+            border-bottom: 3px solid var(--color-accent);
+            padding-bottom: 0.5em;
+        }
+
+        .video-container {
+            width: 100%;
+            margin: 2.5em 0;
+            border: 1px solid var(--color-border);
+            background: #000;
+        }
+
+        video {
+            width: 100%;
+            max-height: 600px;
+            display: block;
+        }
+
+        .metadata {
+            margin: 2.5em 0;
+            padding: 1.5em 0;
+            border-top: 1px solid var(--color-border);
+            border-bottom: 1px solid var(--color-border);
+            font-family: 'Lato', 'Helvetica Neue', sans-serif;
+            font-size: 0.9em;
+            line-height: 1.6;
+        }
+
+        .metadata p {
+            margin: 0.5em 0;
+        }
+
+        .metadata strong {
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            font-size: 0.85em;
+            color: var(--color-text-light);
+        }
+
+        .source {
+            margin-top: 2.5em;
+            padding: 1.5em;
+            background: var(--bg-secondary);
+            border-left: 3px solid var(--color-accent);
+            font-size: 0.9em;
+        }
+
+        .source p {
+            margin: 0;
+            font-family: 'Lato', sans-serif;
+        }
+
+        a {
+            color: var(--color-link);
+            text-decoration: none;
+            border-bottom: 1px solid transparent;
+            transition: border-bottom-color 0.2s ease;
+        }
+
+        a:hover {
+            border-bottom-color: var(--color-link);
+        }
+
+        .archive-note {
+            margin-top: 3em;
+            padding-top: 2em;
+            border-top: 1px solid var(--color-border);
+            font-size: 0.85em;
+            color: var(--color-text-light);
+            text-align: center;
+            font-family: 'Lato', sans-serif;
+            font-style: italic;
+        }
+
+        .download-section {
+            margin-top: 2em;
+            padding: 1.5em;
+            background: var(--bg-secondary);
+            border: 1px solid var(--color-border);
+        }
+
+        .download-section.hidden {
+            display: none;
+        }
+
+        .download-section p {
+            margin: 0 0 1em 0;
+            font-family: 'Lato', sans-serif;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            font-size: 0.85em;
+        }
+
+        .download-button {
+            display: inline-block;
+            padding: 10px 20px;
+            margin: 0 10px 10px 0;
+            background: var(--color-accent);
+            color: white;
+            border: 2px solid var(--color-accent);
+            cursor: pointer;
+            font-family: 'Lato', sans-serif;
+            font-weight: 700;
+            font-size: 0.85em;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            transition: all 0.2s ease;
+        }
+
+        .download-button:hover {
+            background: white;
+            color: var(--color-accent);
+        }
+
+        /* Responsive design */
+        @media (max-width: 600px) {
+            body {
+                padding: 40px 20px;
+                font-size: 16px;
+            }
+
+            h1 {
+                font-size: 1.3em;
+            }
+        }
+"""
+
 STYLE_DEFAULT = """
         body {
             font-family: Arial, sans-serif;
@@ -333,6 +500,7 @@ STYLE_DEFAULT = """
 # Style dictionary for easy access
 STYLES = {
     'bubblegum': STYLE_BUBBLEGUM,
+    'newyork': STYLE_NEWYORK,
     'default': STYLE_DEFAULT,
 }
 
