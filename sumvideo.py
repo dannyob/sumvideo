@@ -581,7 +581,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     </div>
  
     <div class="archive-note">
-        <p>This is an archived copy of the original content, saved on {{ archive_date }}.</p>
+        <p>This is an archived copy of <a href="{{ webpage_url }}" target="_blank">the original content</a>, saved on {{ archive_date }} by <a href="https://github.com/dannyob/sumvideo" target="_blank">sumvideo</a>.</p>
         {% if is_standalone %}
         <p>This is a standalone HTML file with embedded video and JSON data.</p>
         {% endif %}
