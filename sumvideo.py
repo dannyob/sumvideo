@@ -36,7 +36,7 @@ IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp']
 MAX_TITLE_LENGTH = 40
 MAX_DESCRIPTION_LENGTH = 150
 DEFAULT_VIDEO_FORMAT = 'mp4'
-DEFAULT_STYLE = 'bubblegum'
+DEFAULT_STYLE = 'newyork'
 
 # CSS Styles - modular design allows for easy style switching
 STYLE_BUBBLEGUM = """
