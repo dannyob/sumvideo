@@ -44,7 +44,7 @@ STYLE_BUBBLEGUM = """
         @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&family=Quicksand:wght@500;700&display=swap');
 
         :root {
-            --bg-primary: #fff7fb;
+            --bg-primary: #fde8f4;
             --bg-secondary: #fef4f9;
             --color-primary: #f9c0e0;
             --color-accent: #c4f0e4;
@@ -56,7 +56,7 @@ STYLE_BUBBLEGUM = """
             --border-radius-sm: 16px;
             --shadow-soft: 0 8px 24px rgba(249, 192, 224, 0.15);
             --shadow-hover: 0 12px 32px rgba(249, 192, 224, 0.25);
-            --gradient-primary: linear-gradient(135deg, #fab6e7 0%, #ffd6f3 100%);
+            --gradient-primary: linear-gradient(135deg, #e88bb8 0%, #c4a7e7 50%, #89cff0 100%);
             --gradient-accent: linear-gradient(135deg, #c4f0e4 0%, #e0f7f1 100%);
         }
 
@@ -78,7 +78,7 @@ STYLE_BUBBLEGUM = """
         h1 {
             font-family: 'Quicksand', 'Poppins', sans-serif;
             font-weight: 700;
-            font-size: 2.5em;
+            font-size: 1.8em;
             margin: 0 0 1.5rem 0;
             color: var(--color-text);
             background: var(--gradient-primary);
@@ -256,7 +256,7 @@ STYLE_BUBBLEGUM = """
             }
 
             h1 {
-                font-size: 2em;
+                font-size: 1.5em;
             }
 
             .metadata, .download-section {
