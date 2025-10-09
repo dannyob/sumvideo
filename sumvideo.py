@@ -36,26 +36,236 @@ IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp']
 MAX_TITLE_LENGTH = 40
 MAX_DESCRIPTION_LENGTH = 150
 DEFAULT_VIDEO_FORMAT = 'mp4'
+DEFAULT_STYLE = 'bubblegum'
 
-# HTML template for the description page
-HTML_TEMPLATE = """<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ title }}</title>
-    
-    <!-- Open Graph metadata for rich previews -->
-    <meta property="og:title" content="{{ title }}">
-    <meta property="og:type" content="video.other">
-    <meta property="og:description" content="{{ short_description }}">
-    {% if og_image_data_url %}
-    <meta property="og:image" content="{{ og_image_data_url }}">
-    {% endif %}
-    <meta property="og:site_name" content="SumVideo Archive">
-    <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:creator" content="{{ uploader }}">
-    <style>
+# CSS Styles - modular design allows for easy style switching
+STYLE_BUBBLEGUM = """
+        /* 🧁 Bubblegum Aesthetic - Soft, Playful, and Modern */
+        @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&family=Quicksand:wght@500;700&display=swap');
+
+        :root {
+            --bg-primary: #fff7fb;
+            --bg-secondary: #fef4f9;
+            --color-primary: #f9c0e0;
+            --color-accent: #c4f0e4;
+            --color-text: #4a3f5a;
+            --color-text-light: #7a6f8a;
+            --color-link: #e88bb8;
+            --color-link-hover: #d66a9f;
+            --border-radius: 24px;
+            --border-radius-sm: 16px;
+            --shadow-soft: 0 8px 24px rgba(249, 192, 224, 0.15);
+            --shadow-hover: 0 12px 32px rgba(249, 192, 224, 0.25);
+            --gradient-primary: linear-gradient(135deg, #fab6e7 0%, #ffd6f3 100%);
+            --gradient-accent: linear-gradient(135deg, #c4f0e4 0%, #e0f7f1 100%);
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            line-height: 1.7;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 40px 24px;
+            background: var(--bg-primary);
+            color: var(--color-text);
+            font-weight: 300;
+        }
+
+        h1 {
+            font-family: 'Quicksand', 'Poppins', sans-serif;
+            font-weight: 700;
+            font-size: 2.5em;
+            margin: 0 0 1.5rem 0;
+            color: var(--color-text);
+            background: var(--gradient-primary);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            line-height: 1.3;
+            letter-spacing: -0.02em;
+        }
+
+        .video-container {
+            width: 100%;
+            margin: 2rem 0;
+            border-radius: var(--border-radius);
+            overflow: hidden;
+            box-shadow: var(--shadow-soft);
+            background: white;
+            padding: 8px;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .video-container:hover {
+            transform: translateY(-4px);
+            box-shadow: var(--shadow-hover);
+        }
+
+        video {
+            width: 100%;
+            max-height: 600px;
+            border-radius: var(--border-radius-sm);
+            display: block;
+        }
+
+        .metadata {
+            background: var(--gradient-accent);
+            padding: 2rem;
+            border-radius: var(--border-radius);
+            margin: 2rem 0;
+            box-shadow: var(--shadow-soft);
+            border: 2px solid rgba(255, 255, 255, 0.8);
+        }
+
+        .metadata p {
+            margin: 0.75rem 0;
+            font-size: 1em;
+        }
+
+        .metadata strong {
+            font-weight: 600;
+            color: var(--color-text);
+        }
+
+        .source {
+            margin-top: 2.5rem;
+            padding: 1.5rem;
+            background: var(--bg-secondary);
+            border-radius: var(--border-radius-sm);
+            border-left: 4px solid var(--color-primary);
+        }
+
+        a {
+            color: var(--color-link);
+            text-decoration: none;
+            font-weight: 400;
+            transition: all 0.2s ease;
+            position: relative;
+        }
+
+        a:hover {
+            color: var(--color-link-hover);
+            transform: translateY(-1px);
+        }
+
+        a::after {
+            content: '';
+            position: absolute;
+            bottom: -2px;
+            left: 0;
+            width: 0;
+            height: 2px;
+            background: var(--gradient-primary);
+            transition: width 0.3s ease;
+        }
+
+        a:hover::after {
+            width: 100%;
+        }
+
+        .archive-note {
+            border-top: 2px solid rgba(249, 192, 224, 0.2);
+            margin-top: 3rem;
+            padding-top: 2rem;
+            font-size: 0.9em;
+            color: var(--color-text-light);
+            text-align: center;
+        }
+
+        .download-section {
+            margin-top: 2rem;
+            padding: 2rem;
+            background: var(--gradient-primary);
+            border-radius: var(--border-radius);
+            box-shadow: var(--shadow-soft);
+        }
+
+        .download-section.hidden {
+            display: none;
+        }
+
+        .download-section p {
+            margin: 0 0 1rem 0;
+            font-weight: 600;
+            color: var(--color-text);
+        }
+
+        .download-button {
+            display: inline-block;
+            padding: 12px 24px;
+            margin: 8px 8px 8px 0;
+            background: white;
+            color: var(--color-text);
+            border-radius: 999px;
+            cursor: pointer;
+            font-weight: 500;
+            font-family: 'Poppins', sans-serif;
+            border: 2px solid rgba(249, 192, 224, 0.3);
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 12px rgba(249, 192, 224, 0.2);
+        }
+
+        .download-button:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 8px 20px rgba(249, 192, 224, 0.35);
+            background: var(--bg-primary);
+            border-color: var(--color-primary);
+        }
+
+        .download-button:active {
+            transform: translateY(-1px);
+        }
+
+        /* Floating blob decorations */
+        body::before {
+            content: '';
+            position: fixed;
+            top: -150px;
+            right: -150px;
+            width: 400px;
+            height: 400px;
+            background: radial-gradient(circle at 30% 30%, rgba(249, 192, 224, 0.2), rgba(255, 214, 243, 0.1));
+            border-radius: 50%;
+            filter: blur(60px);
+            z-index: -1;
+            pointer-events: none;
+        }
+
+        body::after {
+            content: '';
+            position: fixed;
+            bottom: -150px;
+            left: -150px;
+            width: 400px;
+            height: 400px;
+            background: radial-gradient(circle at 70% 70%, rgba(196, 240, 228, 0.2), rgba(224, 247, 241, 0.1));
+            border-radius: 50%;
+            filter: blur(60px);
+            z-index: -1;
+            pointer-events: none;
+        }
+
+        /* Responsive design */
+        @media (max-width: 600px) {
+            body {
+                padding: 24px 16px;
+            }
+
+            h1 {
+                font-size: 2em;
+            }
+
+            .metadata, .download-section {
+                padding: 1.5rem;
+            }
+        }
+"""
+
+STYLE_DEFAULT = """
         body {
             font-family: Arial, sans-serif;
             line-height: 1.6;
@@ -101,7 +311,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             padding: 15px;
             background-color: #f0f0f0;
             border-radius: 5px;
-            display: {{ 'block' if is_standalone else 'none' }};
+        }
+
+        .download-section.hidden {
+            display: none;
         }
         .download-button {
             display: inline-block;
@@ -115,6 +328,34 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         .download-button:hover {
             background-color: #0055aa;
         }
+"""
+
+# Style dictionary for easy access
+STYLES = {
+    'bubblegum': STYLE_BUBBLEGUM,
+    'default': STYLE_DEFAULT,
+}
+
+# HTML template for the description page
+HTML_TEMPLATE = """<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }}</title>
+    
+    <!-- Open Graph metadata for rich previews -->
+    <meta property="og:title" content="{{ title }}">
+    <meta property="og:type" content="video.other">
+    <meta property="og:description" content="{{ short_description }}">
+    {% if og_image_data_url %}
+    <meta property="og:image" content="{{ og_image_data_url }}">
+    {% endif %}
+    <meta property="og:site_name" content="SumVideo Archive">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:creator" content="{{ uploader }}">
+    <style>
+{{ styles }}
     </style>
     {% if is_standalone %}
     <script>
@@ -165,13 +406,11 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     <div class="source">
         <p>Original source: <a href="{{ webpage_url }}" target="_blank">{{ webpage_url }}</a></p>
     </div>
-    {% if is_standalone %}
-    <div class="download-section">
+    <div class="download-section{% if not is_standalone %} hidden{% endif %}">
         <p><strong>Download Files:</strong></p>
         <button class="download-button" onclick="downloadVideo()">Download Video</button>
         <button class="download-button" onclick="downloadJSON()">Download JSON Metadata</button>
     </div>
-    {% endif %}
  
     <div class="archive-note">
         <p>This is an archived copy of the original content, saved on {{ archive_date }}.</p>
@@ -372,17 +611,18 @@ def get_image_mime_type(file_path: Union[str, Path]) -> str:
     }
     return mime_types.get(ext, 'image/jpeg')  # Default to JPEG if unknown
 
-def create_html(metadata: Dict[str, Any], video_path: Union[str, Path], output_dir: Union[str, Path], 
-              standalone: bool = False) -> str:
+def create_html(metadata: Dict[str, Any], video_path: Union[str, Path], output_dir: Union[str, Path],
+              standalone: bool = False, style: str = DEFAULT_STYLE) -> str:
     """
     Create an HTML description page for the video.
-    
+
     Args:
         metadata: Video metadata from yt-dlp
         video_path: Path to the downloaded video file
         output_dir: Directory to save the HTML file
         standalone: Whether to create a standalone HTML file with embedded data
-    
+        style: Style name to use for the HTML page (default: bubblegum)
+
     Returns:
         Path to the created HTML file
     """
@@ -496,7 +736,10 @@ def create_html(metadata: Dict[str, Any], video_path: Union[str, Path], output_d
     slug = generate_short_slug(title, metadata.get('upload_date'))
     html_filename = f"{slug}.html"
     html_path = output_dir_obj / html_filename
-    
+
+    # Select the style CSS
+    style_css = STYLES.get(style, STYLES[DEFAULT_STYLE])
+
     # Create Jinja2 environment and template
     # Disable autoescape to prevent double-escaping of HTML entities
     env = Environment(
@@ -504,10 +747,10 @@ def create_html(metadata: Dict[str, Any], video_path: Union[str, Path], output_d
         autoescape=False
     )
     template = env.from_string(HTML_TEMPLATE)
-    
+
     # Render the template with ISO date format for archive date
     archive_date = datetime.now().strftime("%Y-%m-%d")
-    
+
     html_content = template.render(
         title=title,
         uploader=uploader,
@@ -522,7 +765,8 @@ def create_html(metadata: Dict[str, Any], video_path: Union[str, Path], output_d
         video_data_url=video_data_url,
         json_data_base64=json_data_base64,
         html_filename=slug,  # HTML filename without extension
-        og_image_data_url=og_image_data_url  # Thumbnail for rich previews
+        og_image_data_url=og_image_data_url,  # Thumbnail for rich previews
+        styles=style_css  # Inject the selected style
     )
     
     # Write the HTML file
@@ -588,10 +832,13 @@ Examples:
                       help='Keep all downloaded files (default is to clean up)')
     parser.add_argument('-v', '--verbose', action='store_true', 
                       help='Enable verbose logging')
-    parser.add_argument('--cookies-from-browser', 
+    parser.add_argument('--cookies-from-browser',
                       help='Extract cookies from browser (chrome, firefox, safari, etc.)')
-    parser.add_argument('--cookies', 
+    parser.add_argument('--cookies',
                       help='Path to Netscape format cookie file')
+    parser.add_argument('--style', default=DEFAULT_STYLE,
+                      choices=list(STYLES.keys()),
+                      help=f'Visual style for the HTML page (default: {DEFAULT_STYLE})')
     args = parser.parse_args()
     
     # Set logging level based on verbose flag
@@ -695,7 +942,7 @@ Examples:
     
     # Create the HTML description page
     logger.info("Creating HTML description page...")
-    html_path = create_html(metadata, str(video_path), str(output_dir), args.standalone)
+    html_path = create_html(metadata, str(video_path), str(output_dir), args.standalone, args.style)
     html_path = Path(html_path)  # Convert back to Path object
     
     # Determine if we should clean up files (default is yes, unless --keep-all is specified)

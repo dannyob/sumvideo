@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "sumvideo"
-version = "0.2.0"
+version = "0.5.0"
 description = "A tool to convert videos via yt-dlp to local HTML pages that can be shared."
 authors = [
     {name = "Danny O'Brien", email = "danny@spesh.com"},
