@@ -37,6 +37,9 @@
 - **XDG_VIDEOS_DIR** - Default output directory (checked first)
 - **SUMVIDEO_DIR** - Alternative default output directory (checked second)
 - If neither is set, outputs to `./videos/` in current directory
+- **SUMVIDEO_BASE_URL** - Public URL where the default output directory is served.
+  Makes `og:image`/`og:url` absolute and prints the page's public URL. Ignored when
+  `-o` points elsewhere. Never commit a real value (use `https://example.com/...` in docs/tests)
 
 ## Directory Structure
 - **Root**: Contains main program (`sumvideo.py`) and test runner (`run_tests.py`)
@@ -68,7 +71,7 @@
 - **Title Cleaning**: Automatically removes social media hashtags from titles
 - **Standalone Mode**: Can embed video and JSON metadata directly in HTML as base64
 - **Cleanup Behavior**:
-  - Default: Removes JSON metadata and thumbnails, keeps video file
+  - Default: Removes JSON metadata, keeps video file and thumbnail (converted to JPEG)
   - Standalone mode: Removes all files (video embedded in HTML)
   - `--keep-all` flag: Keeps everything
 - **Cookie Support**: Can extract cookies from browsers for authenticated downloads

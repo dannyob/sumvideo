@@ -84,12 +84,35 @@ uv pip install jinja2 yt-dlp python-slugify
 ./sumvideo.py --keep-all https://www.youtube.com/watch?v=example
 ```
 
+### Environment variables
+
+- `XDG_VIDEOS_DIR`, then `SUMVIDEO_DIR`: default output directory when `-o` isn't
+  given. If neither is set, files go in `./videos/`.
+- `SUMVIDEO_BASE_URL`: the public URL where the default output directory is
+  served, if you publish it on the web. When set, pages get absolute `og:image`
+  and `og:url` links, which link previews need, and SumVideo prints the page's
+  public URL when it finishes. It is ignored when `-o` points somewhere other
+  than the default output directory.
+
+```bash
+export SUMVIDEO_DIR=~/www/videos
+export SUMVIDEO_BASE_URL=https://example.com/videos/
+sumvideo https://www.youtube.com/watch?v=example
+# ...
+# Public URL: https://example.com/videos/example-video-0101.html
+```
+
 ### Output
 
 For each video, SumVideo creates:
 - Video file: `[slug].[format]` (e.g., `my-video-2024-07-08.mp4`)
 - HTML page: `[slug].html` with embedded video player and metadata
-- Thumbnail: Embedded as base64 in the HTML for portability
+- Thumbnail: `[slug].jpg`, used as the video poster and the `og:image`
+  preview image
+
+With `--standalone`, the video and thumbnail are embedded in the HTML page
+instead, and the page has no `og:image` (link previews can't use an embedded
+image).
 
 ## Development
 

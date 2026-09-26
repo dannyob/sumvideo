@@ -17,6 +17,8 @@ import tempfile
 import base64
 import json
 import re
+import shutil
+import subprocess
 from unittest import mock
 
 
@@ -146,12 +148,85 @@ class TestSumVideo(unittest.TestCase):
             self.sample_metadata, self.video_path, self.output_dir, **kwargs)
         return Path(html_path).read_text(encoding='utf-8')
 
-    def test_thumbnail_used_as_poster(self):
-        """The video thumbnail should be the video's poster image."""
+    THUMB_URL_NAME = 'Test%20Video%20with%20%26amp%3B%20symbol.jpg'
+
+    def _write_thumbnail(self):
         thumb = Path(self.output_dir) / 'Test Video with &amp; symbol.jpg'
         thumb.write_bytes(b'\xff\xd8\xff fake jpeg')
+        return thumb
+
+    def test_thumbnail_file_used_as_poster_and_og_image(self):
+        """Normal pages reference the thumbnail file instead of embedding it."""
+        self._write_thumbnail()
         html_content = self._render()
+        self.assertIn(f'poster="{self.THUMB_URL_NAME}"', html_content)
+        self.assertIn(f'<meta property="og:image" content="{self.THUMB_URL_NAME}">',
+                      html_content)
+        self.assertNotIn('data:image', html_content)
+        self.assertNotIn('og:url', html_content)
+
+    def test_base_url_makes_absolute_og_urls(self):
+        """With a base URL, og:image and og:url are absolute."""
+        self._write_thumbnail()
+        html_content = self._render(base_url='https://example.com/videos')
+        self.assertIn('<meta property="og:image" content='
+                      f'"https://example.com/videos/{self.THUMB_URL_NAME}">', html_content)
+        self.assertRegex(html_content, r'<meta property="og:url" '
+                         r'content="https://example\.com/videos/test-video-[a-z0-9-]+\.html">')
+        # The poster stays relative so the page also works when opened locally
+        self.assertIn(f'poster="{self.THUMB_URL_NAME}"', html_content)
+
+    def test_standalone_embeds_poster_once_and_skips_og_image(self):
+        """Standalone pages embed the thumbnail as the poster and have no og:image."""
+        self._write_thumbnail()
+        html_content = self._render(standalone=True)
         self.assertRegex(html_content, r'<video[^>]*poster="data:image/jpeg;base64,')
+        self.assertEqual(html_content.count('data:image/jpeg;base64,'), 1)
+        self.assertNotIn('og:image', html_content)
+
+    def test_public_url(self):
+        """Public URLs join the base URL and a quoted filename."""
+        public_url = TestSumVideo.module.public_url
+        self.assertEqual(public_url('https://example.com/v', 'a b.html'),
+                         'https://example.com/v/a%20b.html')
+        self.assertEqual(public_url('https://example.com/v/', 'a.html'),
+                         'https://example.com/v/a.html')
+
+    def test_base_url_only_applies_to_default_output_dir(self):
+        """SUMVIDEO_BASE_URL describes the default directory, not arbitrary -o paths."""
+        get_base_url = TestSumVideo.module.get_base_url
+        env = {'SUMVIDEO_DIR': self.output_dir, 'SUMVIDEO_BASE_URL': 'https://example.com/v'}
+        with mock.patch.dict(os.environ, env, clear=True):
+            self.assertEqual(get_base_url(Path(self.output_dir)), 'https://example.com/v')
+            self.assertIsNone(get_base_url(Path(self.output_dir) / 'elsewhere'))
+        with mock.patch.dict(os.environ, {'SUMVIDEO_DIR': self.output_dir}, clear=True):
+            self.assertIsNone(get_base_url(Path(self.output_dir)))
+
+    @unittest.skipUnless(shutil.which('ffmpeg'), 'needs ffmpeg')
+    def test_non_jpeg_thumbnail_converted_to_jpeg(self):
+        """webp/png thumbnails are converted to jpg, which link previews handle better."""
+        png = Path(self.output_dir) / 'thumb.png'
+        subprocess.run(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i', 'color=red:s=16x16',
+                        '-frames:v', '1', str(png)], check=True)
+        result = TestSumVideo.module.ensure_jpeg_thumbnail(png)
+        self.assertEqual(result, png.with_suffix('.jpg'))
+        self.assertTrue(result.read_bytes().startswith(b'\xff\xd8'))
+        self.assertFalse(png.exists())
+
+    def test_thumbnail_files_uses_real_filenames(self):
+        """Only real directory entries are returned, whatever the filesystem's case rules."""
+        thumbnail_files = TestSumVideo.module.thumbnail_files
+        (Path(self.output_dir) / 'clip.jpg').write_bytes(b'x')
+        (Path(self.output_dir) / 'other.JPG').write_bytes(b'x')
+        (Path(self.output_dir) / 'clip.mp4').write_bytes(b'x')
+        self.assertEqual([p.name for p in thumbnail_files(Path(self.output_dir), 'clip')],
+                         ['clip.jpg'])
+        self.assertEqual([p.name for p in thumbnail_files(Path(self.output_dir), 'other')],
+                         ['other.JPG'])
+
+    def test_jpeg_thumbnail_left_alone(self):
+        thumb = self._write_thumbnail()
+        self.assertEqual(TestSumVideo.module.ensure_jpeg_thumbnail(thumb), thumb)
 
     def test_no_poster_without_thumbnail(self):
         """No poster attribute when there is no thumbnail."""

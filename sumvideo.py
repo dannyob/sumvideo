@@ -14,9 +14,11 @@ import argparse
 import base64
 import json
 import logging
+import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional, Union
+from urllib.parse import quote
 
 from jinja2 import Environment, FileSystemLoader
 from slugify import slugify
@@ -33,6 +35,7 @@ logger = logging.getLogger('sumvideo')
 # Constants
 VIDEO_EXTENSIONS = ['mp4', 'webm', 'ogg', 'mov']
 IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp']
+THUMBNAIL_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp']
 MAX_TITLE_LENGTH = 40
 MAX_DESCRIPTION_LENGTH = 150
 DEFAULT_VIDEO_FORMAT = 'mp4'
@@ -558,8 +561,11 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     <meta property="og:title" content="{{ title }}">
     <meta property="og:type" content="video.other">
     <meta property="og:description" content="{{ short_description }}">
-    {% if og_image_data_url %}
-    <meta property="og:image" content="{{ og_image_data_url }}">
+    {% if og_image_url %}
+    <meta property="og:image" content="{{ og_image_url }}">
+    {% endif %}
+    {% if page_url %}
+    <meta property="og:url" content="{{ page_url }}">
     {% endif %}
     <meta property="og:site_name" content="SumVideo Archive">
     <meta name="twitter:card" content="summary_large_image">
@@ -602,7 +608,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     
     <div class="video-container">
         <video id="video-player" controls preload="metadata"
-               {%- if og_image_data_url %} poster="{{ og_image_data_url }}"{% endif %}>
+               {%- if poster_url %} poster="{{ poster_url }}"{% endif %}>
             <source src="{{ video_data_url if is_standalone else video_filename }}" type="{{ video_mimetype }}">
             Your browser does not support the video tag. Dagnabbit!
         </video>
@@ -828,8 +834,77 @@ def get_image_mime_type(file_path: Union[str, Path]) -> str:
     }
     return mime_types.get(ext, 'image/jpeg')  # Default to JPEG if unknown
 
+def public_url(base_url: str, filename: str) -> str:
+    """
+    Build the public URL of a file in the output directory.
+
+    Args:
+        base_url: URL where the output directory is served
+        filename: Name of a file in that directory
+
+    Returns:
+        Absolute URL with the filename percent-encoded
+    """
+    return f"{base_url.rstrip('/')}/{quote(filename)}"
+
+def thumbnail_files(directory: Path, stem: str) -> list[Path]:
+    """
+    List the thumbnail files named after a video, as they are actually named on disk.
+
+    Listing the directory (instead of testing guessed names) matters on
+    case-insensitive filesystems, where "clip.JPG" exists whenever "clip.jpg" does.
+
+    Args:
+        directory: Directory containing the video
+        stem: Video filename without its extension
+
+    Returns:
+        Matching thumbnail paths, in THUMBNAIL_EXTENSIONS order
+    """
+    found = [f for f in directory.iterdir()
+             if f.stem == stem and f.suffix.lower() in THUMBNAIL_EXTENSIONS]
+    return sorted(found, key=lambda f: THUMBNAIL_EXTENSIONS.index(f.suffix.lower()))
+
+def find_thumbnail(directory: Path, stem: str) -> Optional[Path]:
+    """
+    Find the thumbnail yt-dlp saved alongside a video.
+
+    Args:
+        directory: Directory containing the video
+        stem: Video filename without its extension
+
+    Returns:
+        Path to the thumbnail, or None if there isn't one
+    """
+    found = thumbnail_files(directory, stem)
+    return found[0] if found else None
+
+def ensure_jpeg_thumbnail(thumbnail_path: Path) -> Path:
+    """
+    Convert a thumbnail to JPEG with ffmpeg; link previews handle JPEG most reliably.
+
+    Args:
+        thumbnail_path: Path to the downloaded thumbnail
+
+    Returns:
+        Path to the JPEG thumbnail, or the original path if it is already a JPEG
+        or conversion failed
+    """
+    if thumbnail_path.suffix.lower() in ('.jpg', '.jpeg'):
+        return thumbnail_path
+    jpeg_path = thumbnail_path.with_suffix('.jpg')
+    try:
+        subprocess.run(['ffmpeg', '-v', 'error', '-y', '-i', str(thumbnail_path), str(jpeg_path)],
+                       check=True, capture_output=True)
+    except (OSError, subprocess.CalledProcessError) as e:
+        logger.warning(f"Could not convert {thumbnail_path.name} to JPEG, keeping it as is: {e}")
+        return thumbnail_path
+    thumbnail_path.unlink()
+    return jpeg_path
+
 def create_html(metadata: Dict[str, Any], video_path: Union[str, Path], output_dir: Union[str, Path],
-              standalone: bool = False, style: str = DEFAULT_STYLE) -> str:
+              standalone: bool = False, style: str = DEFAULT_STYLE,
+              base_url: Optional[str] = None) -> str:
     """
     Create an HTML description page for the video.
 
@@ -838,7 +913,8 @@ def create_html(metadata: Dict[str, Any], video_path: Union[str, Path], output_d
         video_path: Path to the downloaded video file
         output_dir: Directory to save the HTML file
         standalone: Whether to create a standalone HTML file with embedded data
-        style: Style name to use for the HTML page (default: bubblegum)
+        style: Style name to use for the HTML page (default: newyork)
+        base_url: Public URL of output_dir; makes og:image and og:url absolute
 
     Returns:
         Path to the created HTML file
@@ -879,7 +955,6 @@ def create_html(metadata: Dict[str, Any], video_path: Union[str, Path], output_d
     video_filename = video_path_obj.name
     
     # URL encode the filename to handle special characters in HTML
-    from urllib.parse import quote
     url_safe_filename = quote(video_filename)
     
     # Get the file extension and MIME type
@@ -889,7 +964,6 @@ def create_html(metadata: Dict[str, Any], video_path: Union[str, Path], output_d
     # Prepare data for standalone mode and rich previews
     video_data_url = ""
     json_data_base64 = ""
-    og_image_data_url = ""
     
     # Get the base filename for associated files (without extension)
     base_filename = video_path_obj.stem
@@ -916,14 +990,20 @@ def create_html(metadata: Dict[str, Any], video_path: Union[str, Path], output_d
                 thumbnail_path = potential_path
                 break
     
-    # If thumbnail found, create data URL for OG image
-    if thumbnail_path:
+    # Standalone pages embed the thumbnail once, as the poster. Link previews can't
+    # use an embedded image, so they get no og:image. Normal pages reference the file.
+    poster_url = ""
+    og_image_url = ""
+    if thumbnail_path and standalone:
         try:
             thumbnail_mime = get_image_mime_type(thumbnail_path)
             thumbnail_base64 = get_file_as_base64(thumbnail_path)
-            og_image_data_url = f"data:{thumbnail_mime};base64,{thumbnail_base64}"
-        except Exception as e:
-            logger.error(f"Error creating thumbnail data URL: {e}")
+            poster_url = f"data:{thumbnail_mime};base64,{thumbnail_base64}"
+        except OSError as e:
+            logger.error(f"Error embedding thumbnail: {e}")
+    elif thumbnail_path:
+        poster_url = quote(thumbnail_path.name)
+        og_image_url = public_url(base_url, thumbnail_path.name) if base_url else poster_url
     
     if standalone:
         try:
@@ -953,6 +1033,7 @@ def create_html(metadata: Dict[str, Any], video_path: Union[str, Path], output_d
     slug = generate_short_slug(title, metadata.get('upload_date'))
     html_filename = f"{slug}.html"
     html_path = output_dir_obj / html_filename
+    page_url = public_url(base_url, html_filename) if base_url else ""
 
     # Select the style CSS
     style_css = STYLES.get(style, STYLES[DEFAULT_STYLE])
@@ -982,7 +1063,9 @@ def create_html(metadata: Dict[str, Any], video_path: Union[str, Path], output_d
         video_data_url=video_data_url,
         json_data_base64=json_data_base64,
         html_filename=slug,  # HTML filename without extension
-        og_image_data_url=og_image_data_url,  # Thumbnail for rich previews
+        og_image_url=og_image_url,  # Thumbnail for rich previews
+        poster_url=poster_url,
+        page_url=page_url,
         styles=style_css  # Inject the selected style
     )
     
@@ -1026,6 +1109,27 @@ def get_default_output_dir() -> Path:
     default_dir = Path.cwd() / 'videos'
     default_dir.mkdir(parents=True, exist_ok=True)
     return default_dir
+
+def get_base_url(output_dir: Path) -> Optional[str]:
+    """
+    Get the public URL for output_dir from SUMVIDEO_BASE_URL.
+
+    SUMVIDEO_BASE_URL is the URL where the default output directory is served,
+    so it is ignored when writing anywhere else.
+
+    Args:
+        output_dir: Directory the HTML page is written to
+
+    Returns:
+        The base URL, or None if it is unset or does not apply to output_dir
+    """
+    base_url = os.environ.get('SUMVIDEO_BASE_URL')
+    if not base_url:
+        return None
+    if output_dir.resolve() != get_default_output_dir().resolve():
+        logger.info("Ignoring SUMVIDEO_BASE_URL: output is not going to the default directory")
+        return None
+    return base_url
 
 def main():
     # Parse command-line arguments
@@ -1158,9 +1262,16 @@ Examples:
             # If renaming failed, the original path is now invalid, so use the new path
             video_path = new_video_path if new_video_path.exists() else video_path
     
+    # Normal pages link to the thumbnail file, so make it a JPEG for link previews
+    thumbnail_path = find_thumbnail(output_dir, video_path.stem)
+    if thumbnail_path and not args.standalone:
+        thumbnail_path = ensure_jpeg_thumbnail(thumbnail_path)
+
     # Create the HTML description page
     logger.info("Creating HTML description page...")
-    html_path = create_html(metadata, str(video_path), str(output_dir), args.standalone, args.style)
+    base_url = get_base_url(output_dir)
+    html_path = create_html(metadata, str(video_path), str(output_dir), args.standalone, args.style,
+                            base_url=base_url)
     html_path = Path(html_path)  # Convert back to Path object
     
     # Determine if we should clean up files (default is yes, unless --keep-all is specified)
@@ -1177,28 +1288,14 @@ Examples:
         if json_path.exists():
             files_to_remove.append(json_path)
         
-        # Thumbnail file based on yt-dlp's naming convention
-        for ext in ['.jpg', '.jpeg', '.png', '.webp']:
-            thumb_path = output_dir / f"{short_slug}{ext}"
-            if thumb_path.exists():
-                files_to_remove.append(thumb_path)
-                
-        # Also check for uppercase extensions that might be used by yt-dlp
-        for ext in ['.JPG', '.JPEG', '.PNG', '.WEBP']:
-            thumb_path = output_dir / f"{short_slug}{ext}"
-            if thumb_path.exists():
-                files_to_remove.append(thumb_path)
-        
-        # Handle thumbnail files that might be stored with the full video id
+        # Thumbnails named after the video, or after the video id
+        files_to_remove.extend(thumbnail_files(output_dir, short_slug))
         if 'id' in metadata:
-            video_id = metadata['id']
-            for ext in ['.jpg', '.jpeg', '.png', '.webp', '.JPG', '.JPEG', '.PNG', '.WEBP']:
-                thumb_path = output_dir / f"{video_id}{ext}"
-                if thumb_path.exists():
-                    files_to_remove.append(thumb_path)
+            files_to_remove.extend(thumbnail_files(output_dir, str(metadata['id'])))
                     
-        # Filter out the HTML file we just created and remove duplicates
-        files_to_remove = [f for f in files_to_remove if f != html_path]
+        # Keep the HTML file we just created, and the thumbnail a normal page links to
+        keep = {html_path} if args.standalone else {html_path, thumbnail_path}
+        files_to_remove = [f for f in files_to_remove if f not in keep]
         files_to_remove = list(set(files_to_remove))  # Remove duplicates
         
         # Remove the files
@@ -1219,6 +1316,8 @@ Examples:
     # Print final status for user
     print(f"\nSuccessfully downloaded and processed: {video_title}")
     print(f"HTML page created: {html_path}")
+    if base_url:
+        print(f"Public URL: {public_url(base_url, html_path.name)}")
     
     if args.standalone:
         print("Created standalone HTML file with embedded video and metadata.")
@@ -1230,7 +1329,7 @@ Examples:
             print("You can open the HTML page in your browser to view the video and download the original files.")
     else:
         if should_cleanup:
-            print("JSON and thumbnail files have been removed automatically, but video file is preserved.")
+            print("JSON metadata has been removed automatically; video and thumbnail are kept.")
             print("Use --keep-all to keep all downloaded files.")
         else:
             print("All original files kept (--keep-all).")
