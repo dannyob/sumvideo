@@ -21,7 +21,7 @@ clean:
 
 # Run linting
 lint:
-	ruff check sumvideo.py run_tests.py tests/
+	ruff check sumvideo.py run_tests.py tests/ web/
 
 # Run type checking
 typecheck:

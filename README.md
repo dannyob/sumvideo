@@ -123,6 +123,25 @@ With `--standalone`, the video and thumbnail are embedded in the HTML page
 instead, and the page has no `og:image` (link previews can't use an embedded
 image).
 
+## Web front end
+
+`web/sumvideo_web.py` is a small web page for sumvideo: paste a URL and get
+back a standalone HTML page to view or download. Tick "Also publish to the
+archive" to also save the video to `SUMVIDEO_DIR` and rebuild the index. Jobs
+run one at a time using the installed `sumvideo` command.
+
+It listens on `127.0.0.1` only and has no login of its own, so put it behind
+something that controls access. For example, to serve it on a Tailscale
+network under `/sumvideo/`:
+
+```bash
+./web/sumvideo_web.py                     # listens on 127.0.0.1:8765
+tailscale serve --bg --set-path /sumvideo http://127.0.0.1:8765
+```
+
+`web/sumvideo-web.service` runs it as a systemd user service; see the comments
+in that file and `web/sumvideo-web.env.example`.
+
 ## Development
 
 ### Setup

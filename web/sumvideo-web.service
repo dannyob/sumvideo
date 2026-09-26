@@ -1,0 +1,16 @@
+# systemd user service for the sumvideo web front end.
+# Install: cp web/sumvideo-web.service ~/.config/systemd/user/
+#          cp web/sumvideo-web.env.example ~/.config/sumvideo-web.env  (and edit)
+#          systemctl --user enable --now sumvideo-web
+# To keep it running while logged out: loginctl enable-linger $USER
+[Unit]
+Description=sumvideo web front end
+After=network-online.target
+
+[Service]
+EnvironmentFile=%h/.config/sumvideo-web.env
+ExecStart=%h/Public/src/dob/sumvideo/web/sumvideo_web.py
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
