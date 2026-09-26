@@ -166,6 +166,10 @@ class TestSumVideo(unittest.TestCase):
                 self.assertRegex(html_content,
                                  r'\.description\s*\{[^}]*white-space:\s*pre-line')
 
+    def test_default_style_supports_dark_mode(self):
+        """The default style should follow the system dark mode setting."""
+        self.assertIn('prefers-color-scheme: dark', self._render(style='default'))
+
 
 if __name__ == '__main__':
     unittest.main()

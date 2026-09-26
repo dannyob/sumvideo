@@ -433,68 +433,110 @@ STYLE_NEWYORK = """
 """
 
 STYLE_DEFAULT = """
+        :root {
+            --bg: #fafaf8;
+            --fg: #1f2328;
+            --muted: #656d76;
+            --rule: #e4e4e0;
+            --panel: #f1f1ed;
+            --accent: #0b62c4;
+            --accent-hover: #084e9e;
+            --on-accent: #fff;
+        }
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg: #16181b;
+                --fg: #e6e6e3;
+                --muted: #9aa0a6;
+                --rule: #2c2f33;
+                --panel: #1f2226;
+                --accent: #6aa8f0;
+                --accent-hover: #8dbdf4;
+                --on-accent: #0d1117;
+            }
+        }
+        * { box-sizing: border-box; }
         body {
-            font-family: Arial, sans-serif;
-            line-height: 1.6;
-            max-width: 800px;
+            max-width: 860px;
             margin: 0 auto;
-            padding: 20px;
-            color: #333;
+            padding: 32px 20px 48px;
+            background: var(--bg);
+            color: var(--fg);
+            font: 17px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                  "Helvetica Neue", Arial, sans-serif;
+            -webkit-font-smoothing: antialiased;
+        }
+        h1 {
+            font-size: 1.6rem;
+            line-height: 1.25;
+            margin: 0 0 20px;
         }
         .video-container {
-            width: 100%;
-            margin: 20px 0;
+            background: #000;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 4px 24px rgba(0, 0, 0, 0.18);
         }
         video {
+            display: block;
             width: 100%;
-            max-height: 600px;
+            max-height: 75vh;
+            background: #000;
         }
-        .metadata {
-            background-color: #f9f9f9;
-            padding: 15px;
-            border-radius: 5px;
-            margin: 20px 0;
-        }
-        .source {
-            margin-top: 20px;
-            font-style: italic;
-        }
-        a {
-            color: #0066cc;
-            text-decoration: none;
-        }
-        a:hover {
-            text-decoration: underline;
-        }
-        .archive-note {
-            border-top: 1px solid #ddd;
-            margin-top: 30px;
-            padding-top: 15px;
-            font-size: 0.9em;
-            color: #666;
-        }
-        .download-section {
-            margin-top: 20px;
-            padding: 15px;
-            background-color: #f0f0f0;
-            border-radius: 5px;
-        }
-
-        .download-section.hidden {
-            display: none;
-        }
-        .download-button {
+        .metadata { margin: 20px 0; }
+        .metadata p { margin: 0 0 16px; }
+        .metadata .creator,
+        .metadata .published {
             display: inline-block;
+            margin: 0 24px 12px 0;
+        }
+        .metadata strong {
+            color: var(--muted);
+            font-size: 0.75rem;
+            font-weight: 600;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            margin-right: 0.4em;
+        }
+        .metadata .description-label { display: none; }
+        a { color: var(--accent); text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        .source {
+            font-size: 0.9rem;
+            color: var(--muted);
+        }
+        .source p { margin: 0; }
+        .download-section {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 24px;
+            padding: 16px;
+            background: var(--panel);
+            border-radius: 8px;
+        }
+        .download-section.hidden { display: none; }
+        .download-section .download-label { display: none; }
+        .download-button {
+            font: inherit;
+            font-size: 0.9rem;
+            font-weight: 600;
             padding: 8px 16px;
-            margin-right: 10px;
-            background-color: #0066cc;
-            color: white;
-            border-radius: 4px;
+            color: var(--on-accent);
+            background: var(--accent);
+            border: none;
+            border-radius: 6px;
             cursor: pointer;
         }
-        .download-button:hover {
-            background-color: #0055aa;
+        .download-button:hover { background: var(--accent-hover); }
+        .archive-note {
+            border-top: 1px solid var(--rule);
+            margin-top: 40px;
+            padding-top: 14px;
+            font-size: 0.85rem;
+            color: var(--muted);
         }
+        .archive-note p { margin: 4px 0; }
 """
 
 # Style dictionary for easy access
