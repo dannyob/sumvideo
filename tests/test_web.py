@@ -64,6 +64,17 @@ class TestSumVideoWeb(unittest.TestCase):
         self.assertIn('<form', page)
         self.assertIn('name="url"', page)
 
+    def test_archive_link_in_form(self):
+        """With the archive's URL known, "the archive" in the form links to it."""
+        fake = Path(self.tmp.name) / 'sumvideo'
+        app = self.web.create_app(sumvideo_cmd=str(fake), jobs_dir=Path(self.tmp.name) / 'a',
+                                  archive_url='https://example.com/v/?a=1&b=2')
+        page = app.test_client().get('/').get_data(as_text=True)
+        self.assertIn('publish to <a href="https://example.com/v/?a=1&amp;b=2" '
+                      'target="_blank" rel="noopener">the archive</a>', page)
+        # Without it, plain text
+        self.assertIn('publish to the archive', self.client.get('/').get_data(as_text=True))
+
     def test_rejects_non_http_url(self):
         response = self.client.post('/jobs', data={'url': 'file:///etc/passwd'})
         self.assertEqual(response.status_code, 400)

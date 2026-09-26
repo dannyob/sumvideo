@@ -22,6 +22,7 @@ Environment:
     SUMVIDEO_WEB_PREFIX path the app is mounted at, e.g. /sumvideo/ (default: none,
                         links are relative). Set it when a proxy strips the prefix
                         and also answers the bare path without a trailing slash.
+    SUMVIDEO_BASE_URL   public URL of the archive; if set, the form links to it
 """
 import html
 import os
@@ -160,10 +161,12 @@ def page(title: str, body: str, refresh: bool = False) -> str:
 
 
 def create_app(sumvideo_cmd: str = 'sumvideo', jobs_dir: Path | None = None,
-               prefix: str = '') -> Flask:
+               prefix: str = '', archive_url: str = '') -> Flask:
     app = Flask(__name__)
     # With a prefix, links are absolute; without one, relative to the current page
     mount = prefix.rstrip('/') + '/' if prefix else ''
+    archive = (f'<a href="{html.escape(archive_url)}" target="_blank" rel="noopener">'
+               'the archive</a>' if archive_url else 'the archive')
     runner = JobRunner(sumvideo_cmd, jobs_dir or Path.home() / '.cache' / 'sumvideo-web')
 
     @app.get('/')
@@ -175,7 +178,7 @@ def create_app(sumvideo_cmd: str = 'sumvideo', jobs_dir: Path | None = None,
 <h1>sumvideo</h1>
 <form method="post" action="{mount}jobs">
   <input type="url" name="url" placeholder="https://..." required autofocus>
-  <label><input type="checkbox" name="archive"> Also publish to the archive</label>
+  <label><input type="checkbox" name="archive"> Also publish to {archive}</label>
   <div><button type="submit">Make page</button></div>
 </form>
 {'<h2>Recent</h2><ul>' + jobs + '</ul>' if jobs else ''}""")
@@ -229,7 +232,8 @@ def main() -> None:
     app = create_app(sumvideo_cmd=os.environ.get('SUMVIDEO_CMD', 'sumvideo'),
                      jobs_dir=Path(os.environ['SUMVIDEO_WEB_JOBS'])
                      if 'SUMVIDEO_WEB_JOBS' in os.environ else None,
-                     prefix=os.environ.get('SUMVIDEO_WEB_PREFIX', ''))
+                     prefix=os.environ.get('SUMVIDEO_WEB_PREFIX', ''),
+                     archive_url=os.environ.get('SUMVIDEO_BASE_URL', ''))
     serve(app, host='127.0.0.1', port=int(os.environ.get('SUMVIDEO_WEB_PORT', '8765')))
 
 
