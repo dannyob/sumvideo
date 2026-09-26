@@ -4,10 +4,10 @@ Script to run all tests in the tests directory.
 Can be run as a standalone script or imported as a module.
 """
 
-import os
-import sys
 import glob
+import os
 import subprocess
+import sys
 from pathlib import Path
 
 
@@ -47,7 +47,7 @@ def run_tests(verbose=True):
             os.chmod(file_path, 0o755)
         
         # Run the test
-        result = subprocess.run([f'./{test_file}'], capture_output=not verbose)
+        result = subprocess.run([f'./{test_file}'], capture_output=not verbose, check=False)
         
         # Check the exit status
         if result.returncode == 0:

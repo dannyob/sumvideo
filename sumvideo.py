@@ -8,21 +8,21 @@
 # ]
 # ///
 
-import os
-import sys
 import argparse
 import base64
 import json
 import logging
+import os
 import subprocess
-from datetime import datetime
+import sys
+from datetime import date, datetime
 from pathlib import Path
-from typing import Dict, Any, Optional, Union
+from typing import Any
 from urllib.parse import quote
 
+import yt_dlp
 from jinja2 import Environment, FileSystemLoader
 from slugify import slugify
-import yt_dlp
 
 # Configure logging
 logging.basicConfig(
@@ -644,8 +644,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 def format_date(date_str: str) -> str:
     """Format date from YYYYMMDD to ISO format (YYYY-MM-DD)."""
     try:
-        date = datetime.strptime(date_str, "%Y%m%d")
-        return date.strftime("%Y-%m-%d")
+        return date.fromisoformat(date_str).isoformat()
     except ValueError:
         return date_str
 
@@ -681,7 +680,7 @@ def clean_title_hashtags(title: str) -> str:
     # Clean up extra whitespace and return
     return main_content.strip() if main_content.strip() else title
 
-def generate_short_slug(title: str, upload_date: Optional[str] = None) -> str:
+def generate_short_slug(title: str, upload_date: str | None = None) -> str:
     """
     Generate a shortened, meaningful slug from a title with optional date suffix.
     
@@ -729,9 +728,9 @@ def get_mime_type(file_extension: str) -> str:
     }
     return mime_types.get(file_extension.lower(), 'video/mp4')
 
-def download_video(url: str, output_dir: Union[str, Path], format: str = DEFAULT_VIDEO_FORMAT, 
-                  cookies_from_browser: Optional[str] = None, cookies_file: Optional[str] = None,
-                  keep_all: bool = False) -> Optional[Dict[str, Any]]:
+def download_video(url: str, output_dir: str | Path, format: str = DEFAULT_VIDEO_FORMAT, 
+                  cookies_from_browser: str | None = None, cookies_file: str | None = None,
+                  keep_all: bool = False) -> dict[str, Any] | None:
     """
     Download a video using yt-dlp and return its metadata.
     
@@ -785,11 +784,11 @@ def download_video(url: str, output_dir: Union[str, Path], format: str = DEFAULT
     except yt_dlp.utils.DownloadError as e:
         logger.error(f"Error downloading video: {e}")
         return None
-    except Exception as e:
-        logger.error(f"An unexpected error occurred: {e}", exc_info=True)
+    except Exception:
+        logger.exception("An unexpected error occurred")
         return None
 
-def get_file_as_base64(file_path: Union[str, Path]) -> str:
+def get_file_as_base64(file_path: str | Path) -> str:
     """
     Convert file content to base64 string.
     
@@ -807,11 +806,11 @@ def get_file_as_base64(file_path: Union[str, Path]) -> str:
     try:
         with path_obj.open('rb') as file:
             return base64.b64encode(file.read()).decode('utf-8')
-    except (IOError, OSError) as e:
+    except OSError as e:
         logger.error(f"Failed to read file for base64 encoding: {path_obj} - {e}")
         raise
 
-def get_image_mime_type(file_path: Union[str, Path]) -> str:
+def get_image_mime_type(file_path: str | Path) -> str:
     """
     Determine the MIME type of an image based on its extension.
     
@@ -865,7 +864,7 @@ def thumbnail_files(directory: Path, stem: str) -> list[Path]:
              if f.stem == stem and f.suffix.lower() in THUMBNAIL_EXTENSIONS]
     return sorted(found, key=lambda f: THUMBNAIL_EXTENSIONS.index(f.suffix.lower()))
 
-def find_thumbnail(directory: Path, stem: str) -> Optional[Path]:
+def find_thumbnail(directory: Path, stem: str) -> Path | None:
     """
     Find the thumbnail yt-dlp saved alongside a video.
 
@@ -902,9 +901,9 @@ def ensure_jpeg_thumbnail(thumbnail_path: Path) -> Path:
     thumbnail_path.unlink()
     return jpeg_path
 
-def create_html(metadata: Dict[str, Any], video_path: Union[str, Path], output_dir: Union[str, Path],
+def create_html(metadata: dict[str, Any], video_path: str | Path, output_dir: str | Path,
               standalone: bool = False, style: str = DEFAULT_STYLE,
-              base_url: Optional[str] = None) -> str:
+              base_url: str | None = None) -> str:
     """
     Create an HTML description page for the video.
 
@@ -970,7 +969,7 @@ def create_html(metadata: Dict[str, Any], video_path: Union[str, Path], output_d
     
     # Get thumbnail path directly from metadata if available
     thumbnail_path = None
-    if 'thumbnail' in metadata and metadata['thumbnail']:
+    if metadata.get('thumbnail'):
         thumbnail_str = str(metadata['thumbnail'])
         potential_thumbnail = Path(thumbnail_str)
         if potential_thumbnail.exists():
@@ -1024,10 +1023,10 @@ def create_html(metadata: Dict[str, Any], video_path: Union[str, Path], output_d
                     json_data = json.loads(json_content)
                     formatted_json = json.dumps(json_data, indent=2)
                     json_data_base64 = base64.b64encode(formatted_json.encode('utf-8')).decode('utf-8')
-                except Exception as e:
+                except (OSError, ValueError) as e:
                     logger.error(f"Error processing JSON file: {e}")
-        except Exception as e:
-            logger.error(f"Error preparing standalone data: {e}", exc_info=True)
+        except OSError:
+            logger.exception("Error preparing standalone data")
     
     # Generate a shorter, meaningful slug for the filename
     slug = generate_short_slug(title, metadata.get('upload_date'))
@@ -1047,7 +1046,7 @@ def create_html(metadata: Dict[str, Any], video_path: Union[str, Path], output_d
     template = env.from_string(HTML_TEMPLATE)
 
     # Render the template with ISO date format for archive date
-    archive_date = datetime.now().strftime("%Y-%m-%d")
+    archive_date = datetime.now().astimezone().strftime("%Y-%m-%d")
 
     html_content = template.render(
         title=title,
@@ -1073,7 +1072,7 @@ def create_html(metadata: Dict[str, Any], video_path: Union[str, Path], output_d
     try:
         html_path.write_text(html_content, encoding='utf-8')
         logger.info(f"Created HTML file: {html_path}")
-    except Exception as e:
+    except OSError as e:
         logger.error(f"Error writing HTML file: {e}")
     
     return str(html_path)
@@ -1110,7 +1109,7 @@ def get_default_output_dir() -> Path:
     default_dir.mkdir(parents=True, exist_ok=True)
     return default_dir
 
-def get_base_url(output_dir: Path) -> Optional[str]:
+def get_base_url(output_dir: Path) -> str | None:
     """
     Get the public URL for output_dir from SUMVIDEO_BASE_URL.
 
@@ -1204,7 +1203,7 @@ Examples:
     
     # Get the actual downloaded file path from the metadata
     video_path = None
-    if 'requested_downloads' in metadata and metadata['requested_downloads']:
+    if metadata.get('requested_downloads'):
         # yt-dlp stores the actual downloaded filepath in the requested_downloads
         for download in metadata['requested_downloads']:
             if 'filepath' in download and Path(download['filepath']).exists():

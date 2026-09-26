@@ -26,7 +26,7 @@
 ### Development Commands
 - **Install as tool**: `make install` or `uv tool install .`
 - **Install dependencies**: `uv pip install jinja2 yt-dlp python-slugify`
-- **Lint**: `make lint` or `ruff check sumvideo.py`
+- **Lint**: `make lint` or `ruff check sumvideo.py run_tests.py tests/`
 - **Type check**: `make typecheck` or `mypy --follow-untyped-imports sumvideo.py`
 - **Run both**: `make check`
 - **Run tests**: `make test` or `./run_tests.py`
@@ -84,9 +84,9 @@
 ## Code Style Guidelines
 - **Imports**: Standard library first, then third-party, then local
 - **Typing**: Use type hints for all functions (parameters and returns)
-  - Use `Union[str, Path]` for file path parameters
-  - Use `Optional[Type]` for nullable returns
-  - Use `Dict[str, Any]` for JSON-like metadata structures
+  - Use built-in generics and `|` (Python 3.12+): `str | Path` for file path
+    parameters, `Type | None` for nullable returns, `dict[str, Any]` for JSON-like
+    metadata structures
 - **Docstrings**: Google style with Args/Returns sections
 - **Error handling**: Use try/except with specific exceptions
 - **Naming**: snake_case for variables/functions, CamelCase for classes

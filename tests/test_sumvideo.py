@@ -9,16 +9,16 @@
 # ]
 # ///
 
-import os
-import unittest
-import importlib.util
-from pathlib import Path
-import tempfile
 import base64
+import importlib.util
 import json
+import os
 import re
 import shutil
 import subprocess
+import tempfile
+import unittest
+from pathlib import Path
 from unittest import mock
 
 
@@ -134,9 +134,9 @@ class TestSumVideo(unittest.TestCase):
             try:
                 decoded_json = base64.b64decode(base64_data).decode('utf-8')
                 json_data = json.loads(decoded_json)
-                self.assertEqual(json_data['title'], self.sample_metadata['title'])
-            except:
+            except ValueError:
                 self.fail("Failed to decode embedded JSON data")
+            self.assertEqual(json_data['title'], self.sample_metadata['title'])
         
         # Check for download buttons
         self.assertIn('downloadVideo()', html_content)
