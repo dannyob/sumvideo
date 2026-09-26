@@ -17,6 +17,7 @@ import tempfile
 import base64
 import json
 import re
+from unittest import mock
 
 
 class TestSumVideo(unittest.TestCase):
@@ -39,6 +40,7 @@ class TestSumVideo(unittest.TestCase):
         cls.get_file_as_base64 = module.get_file_as_base64
         cls.HTML_TEMPLATE = module.HTML_TEMPLATE
         cls.STYLES = module.STYLES
+        cls.module = module
 
     def setUp(self):
         # Create a temporary directory for test outputs
@@ -169,6 +171,22 @@ class TestSumVideo(unittest.TestCase):
     def test_default_style_supports_dark_mode(self):
         """The default style should follow the system dark mode setting."""
         self.assertIn('prefers-color-scheme: dark', self._render(style='default'))
+
+    def _ydl_opts_used(self, **kwargs):
+        """Run download_video with yt-dlp mocked out; return the options it was given."""
+        with mock.patch.object(TestSumVideo.module.yt_dlp, 'YoutubeDL') as ydl:
+            ydl.return_value.__enter__.return_value.extract_info.return_value = {'title': 't'}
+            TestSumVideo.module.download_video('https://example.com/v', self.output_dir,
+                                               **kwargs)
+        return ydl.call_args.args[0]
+
+    def test_download_removes_intermediate_streams_by_default(self):
+        """Separate video/audio streams should be deleted after yt-dlp merges them."""
+        self.assertFalse(self._ydl_opts_used().get('keepvideo', False))
+
+    def test_download_keeps_intermediate_streams_with_keep_all(self):
+        """--keep-all keeps everything, including the separate streams."""
+        self.assertTrue(self._ydl_opts_used(keep_all=True).get('keepvideo'))
 
 
 if __name__ == '__main__':

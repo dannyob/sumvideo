@@ -724,7 +724,8 @@ def get_mime_type(file_extension: str) -> str:
     return mime_types.get(file_extension.lower(), 'video/mp4')
 
 def download_video(url: str, output_dir: Union[str, Path], format: str = DEFAULT_VIDEO_FORMAT, 
-                  cookies_from_browser: Optional[str] = None, cookies_file: Optional[str] = None) -> Optional[Dict[str, Any]]:
+                  cookies_from_browser: Optional[str] = None, cookies_file: Optional[str] = None,
+                  keep_all: bool = False) -> Optional[Dict[str, Any]]:
     """
     Download a video using yt-dlp and return its metadata.
     
@@ -734,6 +735,7 @@ def download_video(url: str, output_dir: Union[str, Path], format: str = DEFAULT
         format: Video format to download
         cookies_from_browser: Browser to extract cookies from (chrome, firefox, safari, etc.)
         cookies_file: Path to Netscape format cookie file
+        keep_all: Keep the separate video/audio streams after they are merged
     
     Returns:
         Dictionary containing video metadata or None if download failed
@@ -750,7 +752,8 @@ def download_video(url: str, output_dir: Union[str, Path], format: str = DEFAULT
         'outtmpl': {'default': '%(title)s.%(ext)s'},
         'writeinfojson': True,
         'writethumbnail': True,
-        'keepvideo': True,
+        # Separate video/audio streams are deleted after merging unless --keep-all
+        'keepvideo': keep_all,
     }
     
     # Add cookie options if provided
@@ -1066,7 +1069,8 @@ Examples:
     
     # Download the video
     logger.info(f"Downloading video from {args.url}...")
-    metadata = download_video(args.url, output_dir, args.format, args.cookies_from_browser, args.cookies)
+    metadata = download_video(args.url, output_dir, args.format, args.cookies_from_browser,
+                              args.cookies, keep_all=args.keep_all)
     
     if metadata is None:
         logger.error("Download failed. Exiting.")
