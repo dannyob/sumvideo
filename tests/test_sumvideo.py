@@ -264,5 +264,94 @@ class TestSumVideo(unittest.TestCase):
         self.assertTrue(self._ydl_opts_used(keep_all=True).get('keepvideo'))
 
 
+    def _make_page(self, stem, title, upload_date, thumbnail=True, standalone=False):
+        """Create a sumvideo page (and its video/thumbnail files) in the output dir."""
+        video = Path(self.output_dir) / f'{stem}.mp4'
+        video.write_bytes(b'video')
+        if thumbnail:
+            (Path(self.output_dir) / f'{stem}.jpg').write_bytes(b'\xff\xd8\xff jpeg')
+        meta = dict(self.sample_metadata, title=title, upload_date=upload_date)
+        return Path(TestSumVideo.create_html(meta, video, self.output_dir,
+                                             standalone=standalone))
+
+    def test_read_page_info(self):
+        """Title, creator, date and thumbnail are read back from a generated page."""
+        self._write_thumbnail()
+        page = Path(TestSumVideo.create_html(self.sample_metadata, self.video_path,
+                                             self.output_dir))
+        info = TestSumVideo.module.read_page_info(page)
+        self.assertEqual(info['title'], 'Test Video with & symbol')
+        self.assertEqual(info['creator'], 'Test Uploader')
+        self.assertEqual(info['published'], '2025-03-28')
+        self.assertEqual(info['thumbnail'], 'Test Video with &amp; symbol.jpg')
+        self.assertEqual(info['filename'], page.name)
+
+    def test_read_page_info_reads_pages_from_before_open_graph(self):
+        """Early pages have no og: tags but do have sumvideo's archive note."""
+        old = Path(self.output_dir) / 'old.html'
+        old.write_text('<html><head><title>Old one</title></head><body>'
+                       '<h1>Old one</h1><div class="metadata">'
+                       '<p><strong>Creator:</strong> Someone</p>'
+                       '<p><strong>Published:</strong> 2025-03-30</p></div>'
+                       '<div class="archive-note"><p>This is an archived copy of the '
+                       'original content, saved on 2025-03-30.</p></div></body></html>')
+        info = TestSumVideo.module.read_page_info(old)
+        self.assertEqual((info['title'], info['creator'], info['published']),
+                         ('Old one', 'Someone', '2025-03-30'))
+
+    def test_read_page_info_ignores_other_html(self):
+        other = Path(self.output_dir) / 'other.html'
+        other.write_text('<html><head><title>Not ours</title></head></html>')
+        self.assertIsNone(TestSumVideo.module.read_page_info(other))
+
+    def test_build_index_lists_pages_newest_first(self):
+        """The index links every sumvideo page, newest first, and nothing else."""
+        older = self._make_page('older', 'Older &amp; wiser', '20240101')
+        newer = self._make_page('newer', 'Newer video', '20250601')
+        (Path(self.output_dir) / 'other.html').write_text('<html></html>')
+        index = TestSumVideo.module.build_index(Path(self.output_dir))
+        self.assertEqual(index, Path(self.output_dir) / 'index.html')
+        html_content = index.read_text(encoding='utf-8')
+        self.assertIn(f'href="{newer.name}"', html_content)
+        self.assertIn(f'href="{older.name}"', html_content)
+        self.assertLess(html_content.index(newer.name), html_content.index(older.name))
+        self.assertNotIn('other.html', html_content)
+        self.assertIn('Older &amp; wiser', html_content)
+        self.assertNotIn('&amp;amp;', html_content)
+        self.assertIn('src="older.jpg"', html_content)
+        # Rebuilding must not list the index itself
+        html_again = TestSumVideo.module.build_index(Path(self.output_dir)).read_text()
+        self.assertNotIn('href="index.html"', html_again)
+
+    def test_build_index_leaves_out_embedded_images(self):
+        """Standalone pages' embedded posters are too big to copy into the index."""
+        self._make_page('solo', 'Standalone', '20250101', standalone=True)
+        html_content = TestSumVideo.module.build_index(Path(self.output_dir)).read_text()
+        self.assertIn('Standalone', html_content)
+        self.assertNotIn('data:', html_content)
+
+    def test_build_index_with_base_url(self):
+        self._make_page('clip', 'Clip', '20250101')
+        index = TestSumVideo.module.build_index(Path(self.output_dir),
+                                                base_url='https://example.com/v/')
+        self.assertIn('<meta property="og:url" content="https://example.com/v/index.html">',
+                      index.read_text())
+
+    def test_index_option_needs_no_url(self):
+        """`sumvideo --index` rebuilds the index without downloading anything."""
+        self._make_page('clip', 'Clip', '20250101')
+        argv = ['sumvideo', '--index', '-o', self.output_dir]
+        with mock.patch.object(TestSumVideo.module.sys, 'argv', argv), \
+             mock.patch.object(TestSumVideo.module, 'download_video') as download:
+            TestSumVideo.module.main()
+        download.assert_not_called()
+        self.assertIn('clip', (Path(self.output_dir) / 'index.html').read_text())
+
+    def test_url_required_without_index(self):
+        with mock.patch.object(TestSumVideo.module.sys, 'argv', ['sumvideo']), \
+             mock.patch('sys.stderr'), self.assertRaises(SystemExit):
+            TestSumVideo.module.main()
+
+
 if __name__ == '__main__':
     unittest.main()

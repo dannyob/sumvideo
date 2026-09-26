@@ -13,12 +13,14 @@ import base64
 import json
 import logging
 import os
+import re
 import subprocess
 import sys
 from datetime import date, datetime
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 import yt_dlp
 from jinja2 import Environment, FileSystemLoader
@@ -39,6 +41,8 @@ THUMBNAIL_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp']
 MAX_TITLE_LENGTH = 40
 MAX_DESCRIPTION_LENGTH = 150
 DEFAULT_VIDEO_FORMAT = 'mp4'
+SITE_NAME = 'SumVideo Archive'
+INDEX_FILENAME = 'index.html'
 DEFAULT_STYLE = 'newyork'
 
 # CSS Styles - modular design allows for easy style switching
@@ -567,7 +571,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     {% if page_url %}
     <meta property="og:url" content="{{ page_url }}">
     {% endif %}
-    <meta property="og:site_name" content="SumVideo Archive">
+    <meta property="og:site_name" content="{{ site_name }}">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:creator" content="{{ uploader }}">
     <style>
@@ -638,6 +642,108 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <p>This is a standalone HTML file with embedded video and JSON data.</p>
         {% endif %}
     </div>
+</body>
+</html>"""
+
+# HTML template for the index of all pages in a directory
+INDEX_TEMPLATE = """<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ site_name }}</title>
+    <meta property="og:title" content="{{ site_name }}">
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="{{ site_name }}">
+    {% if page_url %}
+    <meta property="og:url" content="{{ page_url }}">
+    {% endif %}
+    <style>
+        :root {
+            --bg: #fafaf8;
+            --fg: #1f2328;
+            --muted: #656d76;
+            --rule: #e4e4e0;
+            --panel: #f1f1ed;
+            --accent: #0b62c4;
+        }
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg: #16181b;
+                --fg: #e6e6e3;
+                --muted: #9aa0a6;
+                --rule: #2c2f33;
+                --panel: #1f2226;
+                --accent: #6aa8f0;
+            }
+        }
+        * { box-sizing: border-box; }
+        body {
+            max-width: 860px;
+            margin: 0 auto;
+            padding: 32px 20px 48px;
+            background: var(--bg);
+            color: var(--fg);
+            font: 17px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                  "Helvetica Neue", Arial, sans-serif;
+            -webkit-font-smoothing: antialiased;
+        }
+        h1 { font-size: 1.6rem; margin: 0 0 4px; }
+        .summary { color: var(--muted); font-size: 0.9rem; margin: 0 0 24px; }
+        ol { list-style: none; margin: 0; padding: 0; }
+        li {
+            display: grid;
+            grid-template-columns: 160px 1fr;
+            gap: 16px;
+            align-items: start;
+            padding: 14px 0;
+            border-top: 1px solid var(--rule);
+        }
+        .thumb {
+            display: block;
+            aspect-ratio: 16 / 9;
+            border-radius: 6px;
+            overflow: hidden;
+            background: var(--panel);
+        }
+        .thumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
+        .title {
+            color: var(--fg);
+            font-weight: 600;
+            text-decoration: none;
+            overflow-wrap: anywhere;
+            display: -webkit-box;
+            -webkit-line-clamp: 3;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+        .title:hover { color: var(--accent); }
+        .meta { color: var(--muted); font-size: 0.85rem; margin: 4px 0 0; }
+        @media (max-width: 480px) {
+            li { grid-template-columns: 112px 1fr; gap: 12px; }
+            body { font-size: 16px; }
+        }
+    </style>
+</head>
+<body>
+    <h1>{{ site_name }}</h1>
+    <p class="summary">{{ pages|length }} video{{ '' if pages|length == 1 else 's' }},
+        updated {{ updated }}</p>
+    <ol>
+    {% for page in pages %}
+        <li>
+            <a class="thumb" href="{{ page.href }}" tabindex="-1" aria-hidden="true">
+                {%- if page.thumbnail_src %}<img src="{{ page.thumbnail_src }}" alt="" loading="lazy">{% endif -%}
+            </a>
+            <div>
+                <a class="title" href="{{ page.href }}">{{ page.title }}</a>
+                <p class="meta">
+                    {{- page.creator }}{% if page.creator and page.published %} &middot; {% endif %}{{ page.published -}}
+                </p>
+            </div>
+        </li>
+    {% endfor %}
+    </ol>
 </body>
 </html>"""
 
@@ -1065,6 +1171,7 @@ def create_html(metadata: dict[str, Any], video_path: str | Path, output_dir: st
         og_image_url=og_image_url,  # Thumbnail for rich previews
         poster_url=poster_url,
         page_url=page_url,
+        site_name=SITE_NAME,
         styles=style_css  # Inject the selected style
     )
     
@@ -1079,6 +1186,125 @@ def create_html(metadata: dict[str, Any], video_path: str | Path, output_dir: st
 
 # This function has been removed as we now directly derive filenames from yt-dlp output
 # rather than searching for files by extension
+
+class _PageInfoParser(HTMLParser):
+    """Collect the parts of a sumvideo page needed for the index."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.meta: dict[str, str] = {}
+        self.title = ""
+        self.poster = ""
+        self.has_archive_note = False
+        self.paragraphs: list[str] = []
+        self._in_title = False
+        self._paragraph: list[str] | None = None
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attributes = dict(attrs)
+        if tag == 'meta':
+            key = attributes.get('property') or attributes.get('name')
+            if key:
+                self.meta[key] = attributes.get('content') or ""
+        elif tag == 'title':
+            self._in_title = True
+        elif tag == 'video':
+            self.poster = attributes.get('poster') or ""
+        elif tag == 'p':
+            self._paragraph = []
+        elif tag == 'div' and 'archive-note' in (attributes.get('class') or '').split():
+            self.has_archive_note = True
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == 'title':
+            self._in_title = False
+        elif tag == 'p' and self._paragraph is not None:
+            self.paragraphs.append("".join(self._paragraph).strip())
+            self._paragraph = None
+
+    def handle_data(self, data: str) -> None:
+        if self._in_title:
+            self.title += data
+        if self._paragraph is not None:
+            self._paragraph.append(data)
+
+def read_page_info(html_path: Path) -> dict[str, str] | None:
+    """
+    Read the title, creator, date and thumbnail from a sumvideo page.
+
+    Args:
+        html_path: Path to an HTML file
+
+    Returns:
+        Dictionary with filename, title, creator, published and thumbnail (a local
+        filename, or "" if the page has none or embeds it), or None if the file
+        is not a sumvideo page
+    """
+    try:
+        text = html_path.read_text(encoding='utf-8', errors='replace')
+    except OSError as e:
+        logger.warning(f"Could not read {html_path.name}: {e}")
+        return None
+    # Standalone pages embed megabytes of base64; drop it before parsing
+    text = re.sub(r'(data:[\w/+.-]+;base64,)[A-Za-z0-9+/=]+', r'\1', text)
+    text = re.sub(r'atob\("[A-Za-z0-9+/=]*"\)', 'atob("")', text)
+    parser = _PageInfoParser()
+    parser.feed(text)
+    # Pages from before Open Graph support have no og:site_name, but every
+    # version has written the archive note
+    if parser.meta.get('og:site_name') != SITE_NAME and not parser.has_archive_note:
+        return None
+
+    def labelled(label: str) -> str:
+        for paragraph in parser.paragraphs:
+            if paragraph.startswith(label):
+                return paragraph[len(label):].strip()
+        return ""
+
+    poster = parser.poster
+    return {
+        'filename': html_path.name,
+        'title': parser.title.strip() or html_path.stem,
+        'creator': parser.meta.get('twitter:creator') or labelled('Creator:'),
+        'published': labelled('Published:'),
+        'thumbnail': "" if not poster or poster.startswith('data:') else unquote(poster),
+    }
+
+def build_index(directory: Path, base_url: str | None = None) -> Path:
+    """
+    Write index.html listing every sumvideo page in a directory, newest first.
+
+    Args:
+        directory: Directory containing sumvideo pages
+        base_url: Public URL of the directory, used for og:url
+
+    Returns:
+        Path to the index file
+    """
+    pages = []
+    for html_path in sorted(directory.glob('*.html')):
+        if html_path.name == INDEX_FILENAME:
+            continue
+        info = read_page_info(html_path)
+        if info is None:
+            continue
+        thumbnail = info['thumbnail']
+        has_thumbnail = bool(thumbnail) and (directory / thumbnail).exists()
+        pages.append(dict(info, href=quote(info['filename']),
+                          thumbnail_src=quote(thumbnail) if has_thumbnail else ""))
+    pages.sort(key=lambda page: (page['published'], page['filename']), reverse=True)
+
+    env = Environment(autoescape=True)
+    html_content = env.from_string(INDEX_TEMPLATE).render(
+        site_name=SITE_NAME,
+        pages=pages,
+        updated=datetime.now().astimezone().strftime("%Y-%m-%d"),
+        page_url=public_url(base_url, INDEX_FILENAME) if base_url else "",
+    )
+    index_path = directory / INDEX_FILENAME
+    index_path.write_text(html_content, encoding='utf-8')
+    logger.info(f"Wrote index of {len(pages)} pages: {index_path}")
+    return index_path
 
 def get_default_output_dir() -> Path:
     """
@@ -1130,6 +1356,19 @@ def get_base_url(output_dir: Path) -> str | None:
         return None
     return base_url
 
+def write_index(output_dir: Path) -> None:
+    """
+    Rebuild the index of pages in output_dir and report where it is.
+
+    Args:
+        output_dir: Directory containing sumvideo pages
+    """
+    base_url = get_base_url(output_dir)
+    index_path = build_index(output_dir, base_url)
+    print(f"Index created: {index_path}")
+    if base_url:
+        print(f"Index URL: {public_url(base_url, INDEX_FILENAME)}")
+
 def main():
     # Parse command-line arguments
     parser = argparse.ArgumentParser(
@@ -1139,9 +1378,10 @@ Examples:
   sumvideo.py https://www.youtube.com/watch?v=dQw4w9WgXcQ
   sumvideo.py --standalone https://twitter.com/username/status/123456789
   sumvideo.py -o ~/Videos -f webm https://vimeo.com/123456789
+  sumvideo.py --index
         '''
     )
-    parser.add_argument('url', help='URL of the video to download')
+    parser.add_argument('url', nargs='?', help='URL of the video to download')
     parser.add_argument('-o', '--output-dir', default=None, 
                       help='Directory to save the video and HTML files')
     parser.add_argument('-f', '--format', default=DEFAULT_VIDEO_FORMAT, 
@@ -1159,7 +1399,12 @@ Examples:
     parser.add_argument('--style', default=DEFAULT_STYLE,
                       choices=list(STYLES.keys()),
                       help=f'Visual style for the HTML page (default: {DEFAULT_STYLE})')
+    parser.add_argument('--index', action='store_true',
+                      help=f'Write {INDEX_FILENAME} listing every page in the output directory '
+                           '(after downloading, if a URL is given)')
     args = parser.parse_args()
+    if not args.url and not args.index:
+        parser.error('a video URL is required (or use --index)')
     
     # Set logging level based on verbose flag
     if args.verbose:
@@ -1169,6 +1414,10 @@ Examples:
     # Determine output directory
     output_dir = Path(args.output_dir) if args.output_dir else get_default_output_dir()
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    if not args.url:
+        write_index(output_dir)
+        return
     
     # Download the video
     logger.info(f"Downloading video from {args.url}...")
@@ -1333,6 +1582,9 @@ Examples:
         else:
             print("All original files kept (--keep-all).")
         print("You can open the HTML page in your browser to view the video and its metadata.")
+
+    if args.index:
+        write_index(output_dir)
 
 if __name__ == "__main__":
     main()

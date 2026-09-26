@@ -22,6 +22,8 @@
 - `-v, --verbose` - Enable verbose logging
 - `--cookies-from-browser BROWSER` - Extract cookies from browser (chrome, firefox, safari, etc.)
 - `--cookies FILE` - Path to Netscape format cookie file
+- `--index` - Write `index.html` listing every sumvideo page in the output directory
+  (URL optional: without one, only the index is rebuilt)
 
 ### Development Commands
 - **Install as tool**: `make install` or `uv tool install .`

@@ -59,6 +59,9 @@ uv pip install jinja2 yt-dlp python-slugify
   - Supported formats: mp4, webm, ogg, mov
 - `--standalone`: Create a standalone HTML file with embedded video and metadata
 - `--keep-all`: Keep all downloaded files (default is to clean up temporary files)
+- `--index`: Write `index.html` listing every SumVideo page in the output
+  directory, newest first. The URL is optional with `--index`: without one,
+  SumVideo just rebuilds the index.
 - `-v, --verbose`: Enable verbose logging for debugging
 - `-h, --help`: Show help message and exit
 
@@ -82,6 +85,12 @@ uv pip install jinja2 yt-dlp python-slugify
 
 # Keep all temporary files
 ./sumvideo.py --keep-all https://www.youtube.com/watch?v=example
+
+# Download, then rebuild the index of the output directory
+./sumvideo.py --index https://www.youtube.com/watch?v=example
+
+# Only rebuild the index
+./sumvideo.py --index
 ```
 
 ### Environment variables
