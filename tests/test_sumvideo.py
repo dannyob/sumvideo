@@ -38,6 +38,7 @@ class TestSumVideo(unittest.TestCase):
         cls.get_mime_type = module.get_mime_type
         cls.get_file_as_base64 = module.get_file_as_base64
         cls.HTML_TEMPLATE = module.HTML_TEMPLATE
+        cls.STYLES = module.STYLES
 
     def setUp(self):
         # Create a temporary directory for test outputs
@@ -137,6 +138,33 @@ class TestSumVideo(unittest.TestCase):
         self.assertIn('downloadVideo()', html_content)
         self.assertIn('downloadJSON()', html_content)
         self.assertIn('class="download-button"', html_content)
+
+    def _render(self, **kwargs):
+        html_path = TestSumVideo.create_html(
+            self.sample_metadata, self.video_path, self.output_dir, **kwargs)
+        return Path(html_path).read_text(encoding='utf-8')
+
+    def test_thumbnail_used_as_poster(self):
+        """The video thumbnail should be the video's poster image."""
+        thumb = Path(self.output_dir) / 'Test Video with &amp; symbol.jpg'
+        thumb.write_bytes(b'\xff\xd8\xff fake jpeg')
+        html_content = self._render()
+        self.assertRegex(html_content, r'<video[^>]*poster="data:image/jpeg;base64,')
+
+    def test_no_poster_without_thumbnail(self):
+        """No poster attribute when there is no thumbnail."""
+        self.assertNotIn('poster=', self._render())
+
+    def test_description_keeps_line_breaks_in_every_style(self):
+        """Descriptions are plain text; their newlines must survive in all styles."""
+        self.sample_metadata['description'] = 'First line\nSecond line'
+        for style in TestSumVideo.STYLES:
+            with self.subTest(style=style):
+                html_content = self._render(style=style)
+                self.assertIn('<p class="description">First line\nSecond line</p>',
+                              html_content)
+                self.assertRegex(html_content,
+                                 r'\.description\s*\{[^}]*white-space:\s*pre-line')
 
 
 if __name__ == '__main__':

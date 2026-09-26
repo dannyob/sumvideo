@@ -523,6 +523,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:creator" content="{{ uploader }}">
     <style>
+        /* Base rules shared by every style */
+        .description { white-space: pre-line; }
+        h1, .description, .source, .archive-note { overflow-wrap: anywhere; }
 {{ styles }}
     </style>
     {% if is_standalone %}
@@ -556,18 +559,19 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     <h1>{{ title }}</h1>
     
     <div class="video-container">
-        <video id="video-player" controls>
+        <video id="video-player" controls preload="metadata"
+               {%- if og_image_data_url %} poster="{{ og_image_data_url }}"{% endif %}>
             <source src="{{ video_data_url if is_standalone else video_filename }}" type="{{ video_mimetype }}">
             Your browser does not support the video tag. Dagnabbit!
         </video>
     </div>
 
     <div class="metadata">
-        <p><strong>Creator:</strong> {{ uploader }}</p>
-        <p><strong>Published:</strong> {{ upload_date }}</p>
+        <p class="creator"><strong>Creator:</strong> {{ uploader }}</p>
+        <p class="published"><strong>Published:</strong> {{ upload_date }}</p>
         {% if description %}
-        <p><strong>Description:</strong></p>
-        <p>{{ description }}</p>
+        <p class="description-label"><strong>Description:</strong></p>
+        <p class="description">{{ description }}</p>
         {% endif %}
     </div>
     
@@ -575,7 +579,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <p>Original source: <a href="{{ webpage_url }}" target="_blank">{{ webpage_url }}</a></p>
     </div>
     <div class="download-section{% if not is_standalone %} hidden{% endif %}">
-        <p><strong>Download Files:</strong></p>
+        <p class="download-label"><strong>Download Files:</strong></p>
         <button class="download-button" onclick="downloadVideo()">Download Video</button>
         <button class="download-button" onclick="downloadJSON()">Download JSON Metadata</button>
     </div>
