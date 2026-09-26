@@ -75,6 +75,20 @@ class TestSumVideoWeb(unittest.TestCase):
         # Without it, plain text
         self.assertIn('publish to the archive', self.client.get('/').get_data(as_text=True))
 
+    def test_archive_link_on_finished_page(self):
+        """A finished archive job's heading links to the archive too."""
+        fake = Path(self.tmp.name) / 'sumvideo'
+        app = self.web.create_app(sumvideo_cmd=str(fake), jobs_dir=Path(self.tmp.name) / 'f',
+                                  archive_url='https://example.com/v/')
+        client = app.test_client()
+        response = client.post('/jobs', data={'url': 'https://example.com/v', 'archive': 'on'})
+        for _ in range(100):
+            page = client.get('/' + response.headers['Location']).get_data(as_text=True)
+            if 'Finished' in page:
+                break
+            time.sleep(0.05)
+        self.assertIn('Finished and published to <a href="https://example.com/v/"', page)
+
     def test_rejects_non_http_url(self):
         response = self.client.post('/jobs', data={'url': 'file:///etc/passwd'})
         self.assertEqual(response.status_code, 400)

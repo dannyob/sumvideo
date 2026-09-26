@@ -206,7 +206,8 @@ def create_app(sumvideo_cmd: str = 'sumvideo', jobs_dir: Path | None = None,
             result_url = f'{mount}jobs/{job.id}/page' if mount else f'{job.id}/page'
             links = (f'<p><a class="button" href="{result_url}">View page</a> '
                      f'<a class="button" href="{result_url}?download=1">Download</a></p>')
-        published = ' and published to the archive' if job.archive and job.status == 'Finished' else ''
+        published = (f' and published to {archive}'
+                     if job.archive and job.status == 'Finished' else '')
         css = ' class="failed"' if job.status == 'Failed' else ''
         return page(f'sumvideo: {job.status}', f"""
 <h1{css}>{job.status}{published}</h1>
