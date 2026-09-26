@@ -19,6 +19,9 @@ Environment:
     SUMVIDEO_WEB_PORT   port to listen on (default 8765)
     SUMVIDEO_WEB_JOBS   directory for job output (default ~/.cache/sumvideo-web)
     SUMVIDEO_CMD        sumvideo command to run (default: sumvideo on PATH)
+    SUMVIDEO_WEB_PREFIX path the app is mounted at, e.g. /sumvideo/ (default: none,
+                        links are relative). Set it when a proxy strips the prefix
+                        and also answers the bare path without a trailing slash.
 """
 import html
 import os
@@ -156,18 +159,21 @@ def page(title: str, body: str, refresh: bool = False) -> str:
 <body>{body}</body></html>"""
 
 
-def create_app(sumvideo_cmd: str = 'sumvideo', jobs_dir: Path | None = None) -> Flask:
+def create_app(sumvideo_cmd: str = 'sumvideo', jobs_dir: Path | None = None,
+               prefix: str = '') -> Flask:
     app = Flask(__name__)
+    # With a prefix, links are absolute; without one, relative to the current page
+    mount = prefix.rstrip('/') + '/' if prefix else ''
     runner = JobRunner(sumvideo_cmd, jobs_dir or Path.home() / '.cache' / 'sumvideo-web')
 
     @app.get('/')
     def index() -> str:
         jobs = ''.join(
-            f'<li><a href="jobs/{job.id}">{html.escape(job.url)}</a> '
+            f'<li><a href="{mount}jobs/{job.id}">{html.escape(job.url)}</a> '
             f'<span class="muted">{job.status}</span></li>' for job in runner.recent())
         return page('sumvideo', f"""
 <h1>sumvideo</h1>
-<form method="post" action="jobs">
+<form method="post" action="{mount}jobs">
   <input type="url" name="url" placeholder="https://..." required autofocus>
   <label><input type="checkbox" name="archive"> Also publish to the archive</label>
   <div><button type="submit">Make page</button></div>
@@ -180,7 +186,7 @@ def create_app(sumvideo_cmd: str = 'sumvideo', jobs_dir: Path | None = None) -> 
         if not url.startswith(('http://', 'https://')):
             abort(400, 'Only http and https URLs are supported')
         job = runner.submit(url, archive=bool(request.form.get('archive')))
-        return redirect(f'jobs/{job.id}', code=303)
+        return redirect(f'{mount}jobs/{job.id}', code=303)
 
     def get_job(job_id: str) -> Job:
         job = runner.jobs.get(job_id)
@@ -194,8 +200,9 @@ def create_app(sumvideo_cmd: str = 'sumvideo', jobs_dir: Path | None = None) -> 
         done = job.status in ('Finished', 'Failed')
         links = ''
         if job.page:
-            links = (f'<p><a class="button" href="{job.id}/page">View page</a> '
-                     f'<a class="button" href="{job.id}/page?download=1">Download</a></p>')
+            result_url = f'{mount}jobs/{job.id}/page' if mount else f'{job.id}/page'
+            links = (f'<p><a class="button" href="{result_url}">View page</a> '
+                     f'<a class="button" href="{result_url}?download=1">Download</a></p>')
         published = ' and published to the archive' if job.archive and job.status == 'Finished' else ''
         css = ' class="failed"' if job.status == 'Failed' else ''
         return page(f'sumvideo: {job.status}', f"""
@@ -203,7 +210,7 @@ def create_app(sumvideo_cmd: str = 'sumvideo', jobs_dir: Path | None = None) -> 
 <p class="muted">{html.escape(job.url)}</p>
 {links}
 <pre>{html.escape(chr(10).join(job.log)) or 'Waiting to start...'}</pre>
-<p><a href="../">Make another</a></p>""", refresh=not done)
+<p><a href="{mount or '../'}">Make another</a></p>""", refresh=not done)
 
     @app.get('/jobs/<job_id>/page')
     def result(job_id: str):
@@ -221,7 +228,8 @@ def main() -> None:
     from waitress import serve
     app = create_app(sumvideo_cmd=os.environ.get('SUMVIDEO_CMD', 'sumvideo'),
                      jobs_dir=Path(os.environ['SUMVIDEO_WEB_JOBS'])
-                     if 'SUMVIDEO_WEB_JOBS' in os.environ else None)
+                     if 'SUMVIDEO_WEB_JOBS' in os.environ else None,
+                     prefix=os.environ.get('SUMVIDEO_WEB_PREFIX', ''))
     serve(app, host='127.0.0.1', port=int(os.environ.get('SUMVIDEO_WEB_PORT', '8765')))
 
 

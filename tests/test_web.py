@@ -114,6 +114,26 @@ class TestSumVideoWeb(unittest.TestCase):
         self.assertIn('Failed', page)
         self.assertIn('ERROR: could not download', page)
 
+    def test_prefix_makes_links_absolute(self):
+        """Behind a proxy that strips /sumvideo/, links must work from /sumvideo too."""
+        fake = Path(self.tmp.name) / 'sumvideo'
+        app = self.web.create_app(sumvideo_cmd=str(fake), jobs_dir=Path(self.tmp.name) / 'p',
+                                  prefix='/sumvideo')
+        client = app.test_client()
+        self.assertIn('action="/sumvideo/jobs"', client.get('/').get_data(as_text=True))
+        response = client.post('/jobs', data={'url': 'https://example.com/v'})
+        location = response.headers['Location']
+        self.assertTrue(location.startswith('/sumvideo/jobs/'), location)
+        job_id = location.rsplit('/', 1)[1]
+        for _ in range(100):
+            page = client.get(f'/jobs/{job_id}').get_data(as_text=True)
+            if 'Finished' in page:
+                break
+            time.sleep(0.05)
+        self.assertIn(f'href="/sumvideo/jobs/{job_id}/page"', page)
+        self.assertIn('href="/sumvideo/"', page)
+        self.assertIn(f'href="/sumvideo/jobs/{job_id}"', client.get('/').get_data(as_text=True))
+
     def test_unknown_job_is_404(self):
         self.assertEqual(self.client.get('/jobs/nope').status_code, 404)
         self.assertEqual(self.client.get('/jobs/../../etc/passwd/page').status_code, 404)

@@ -135,8 +135,8 @@ something that controls access. For example, to serve it on a Tailscale
 network under `/sumvideo/`:
 
 ```bash
-./web/sumvideo_web.py                     # listens on 127.0.0.1:8765
-tailscale serve --bg --set-path /sumvideo http://127.0.0.1:8765
+SUMVIDEO_WEB_PREFIX=/sumvideo/ ./web/sumvideo_web.py
+tailscale serve --bg --set-path /sumvideo/ http://127.0.0.1:8765
 ```
 
 `web/sumvideo-web.service` runs it as a systemd user service; see the comments
