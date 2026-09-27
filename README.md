@@ -59,6 +59,7 @@ uv pip install jinja2 yt-dlp python-slugify
   - Supported formats: mp4, webm, ogg, mov
 - `--standalone`: Create a standalone HTML file with embedded video and metadata
 - `--keep-all`: Keep all downloaded files (default is to clean up temporary files)
+- `--tag TAG`: Tag the page. Repeat for more than one tag.
 - `--index`: Write `index.html` listing every SumVideo page in the output
   directory, newest first. The URL is optional with `--index`: without one,
   SumVideo just rebuilds the index.
@@ -92,6 +93,20 @@ uv pip install jinja2 yt-dlp python-slugify
 # Only rebuild the index
 ./sumvideo.py --index
 ```
+
+### Tags
+
+Each tag is stored as its own line in the page's `<head>`:
+
+```html
+<meta property="video:tag" content="music">
+```
+
+To re-tag a page, add or delete these lines (by hand, or with `sed`), then
+rebuild the index with `sumvideo --index`. The index lists every tag with a
+count, and each tag links to `index.html#tag-<name>`, which shows only the
+videos with that tag. The filtering is done in CSS with `:target`, so it
+works without JavaScript and filtered views can be bookmarked.
 
 ### Environment variables
 

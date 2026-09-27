@@ -10,6 +10,7 @@
 
 import argparse
 import base64
+import html
 import json
 import logging
 import os
@@ -572,6 +573,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     <meta property="og:url" content="{{ page_url }}">
     {% endif %}
     <meta property="og:site_name" content="{{ site_name }}">
+    {% for tag in tags %}
+    <meta property="video:tag" content="{{ tag }}">
+    {% endfor %}
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:creator" content="{{ uploader }}">
     <style>
@@ -723,15 +727,34 @@ INDEX_TEMPLATE = """<!DOCTYPE html>
             li { grid-template-columns: 112px 1fr; gap: 12px; }
             body { font-size: 16px; }
         }
+        .tags a, .tag { color: var(--accent); text-decoration: none; }
+        .tags a:hover, .tag:hover { text-decoration: underline; }
+        .tags { font-size: 0.9rem; margin: 0 0 20px; line-height: 2; }
+        .tags .count { color: var(--muted); font-size: 0.8rem; margin-right: 10px; }
+        .tag { font-size: 0.8rem; margin-left: 8px; }
+        /* Filtering without JavaScript: a tag link targets its anchor below,
+           and these rules hide every entry without that tag. */
+        {% for tag in tags %}
+        #tag-{{ tag.slug }}:target ~ ol > li:not(.t-{{ tag.slug }}) { display: none; }
+        #tag-{{ tag.slug }}:target ~ nav a[href="#tag-{{ tag.slug }}"] { color: var(--fg); font-weight: 700; }
+        {% endfor %}
     </style>
 </head>
 <body>
     <h1>{{ site_name }}</h1>
+    {% for tag in tags %}<span id="tag-{{ tag.slug }}"></span>{% endfor %}
     <p class="summary">{{ pages|length }} video{{ '' if pages|length == 1 else 's' }},
         updated {{ updated }}</p>
+    {% if tags %}
+    <nav class="tags"><a href="#">All</a> <span class="count">{{ pages|length }}</span>
+        {%- for tag in tags %}
+        <a href="#tag-{{ tag.slug }}">{{ tag.name }}</a> <span class="count">{{ tag.count }}</span>
+        {%- endfor %}
+    </nav>
+    {% endif %}
     <ol>
     {% for page in pages %}
-        <li>
+        <li class="{{ page.classes }}">
             <a class="thumb" href="{{ page.href }}" tabindex="-1" aria-hidden="true">
                 {%- if page.thumbnail_src %}<img src="{{ page.thumbnail_src }}" alt="" loading="lazy">{% endif -%}
             </a>
@@ -739,6 +762,7 @@ INDEX_TEMPLATE = """<!DOCTYPE html>
                 <a class="title" href="{{ page.href }}">{{ page.title }}</a>
                 <p class="meta">
                     {{- page.creator }}{% if page.creator and page.published %} &middot; {% endif %}{{ page.published -}}
+                    {%- for slug, name in page.tag_links %}<a class="tag" href="#tag-{{ slug }}">{{ name }}</a>{% endfor -%}
                 </p>
             </div>
         </li>
@@ -1009,7 +1033,7 @@ def ensure_jpeg_thumbnail(thumbnail_path: Path) -> Path:
 
 def create_html(metadata: dict[str, Any], video_path: str | Path, output_dir: str | Path,
               standalone: bool = False, style: str = DEFAULT_STYLE,
-              base_url: str | None = None) -> str:
+              base_url: str | None = None, tags: list[str] | None = None) -> str:
     """
     Create an HTML description page for the video.
 
@@ -1020,6 +1044,7 @@ def create_html(metadata: dict[str, Any], video_path: str | Path, output_dir: st
         standalone: Whether to create a standalone HTML file with embedded data
         style: Style name to use for the HTML page (default: newyork)
         base_url: Public URL of output_dir; makes og:image and og:url absolute
+        tags: Tags for the page, each written as a video:tag meta line
 
     Returns:
         Path to the created HTML file
@@ -1172,6 +1197,8 @@ def create_html(metadata: dict[str, Any], video_path: str | Path, output_dir: st
         poster_url=poster_url,
         page_url=page_url,
         site_name=SITE_NAME,
+        # The page template doesn't autoescape; tags are free text
+        tags=[html.escape(tag) for tag in tags or []],
         styles=style_css  # Inject the selected style
     )
     
@@ -1196,6 +1223,7 @@ class _PageInfoParser(HTMLParser):
         self.title = ""
         self.poster = ""
         self.has_archive_note = False
+        self.tags: list[str] = []
         self.paragraphs: list[str] = []
         self._in_title = False
         self._paragraph: list[str] | None = None
@@ -1204,7 +1232,9 @@ class _PageInfoParser(HTMLParser):
         attributes = dict(attrs)
         if tag == 'meta':
             key = attributes.get('property') or attributes.get('name')
-            if key:
+            if key == 'video:tag':
+                self.tags.append(attributes.get('content') or "")
+            elif key:
                 self.meta[key] = attributes.get('content') or ""
         elif tag == 'title':
             self._in_title = True
@@ -1228,7 +1258,7 @@ class _PageInfoParser(HTMLParser):
         if self._paragraph is not None:
             self._paragraph.append(data)
 
-def read_page_info(html_path: Path) -> dict[str, str] | None:
+def read_page_info(html_path: Path) -> dict[str, Any] | None:
     """
     Read the title, creator, date and thumbnail from a sumvideo page.
 
@@ -1236,9 +1266,9 @@ def read_page_info(html_path: Path) -> dict[str, str] | None:
         html_path: Path to an HTML file
 
     Returns:
-        Dictionary with filename, title, creator, published and thumbnail (a local
-        filename, or "" if the page has none or embeds it), or None if the file
-        is not a sumvideo page
+        Dictionary with filename, title, creator, published, thumbnail (a local
+        filename, or "" if the page has none or embeds it) and tags (a list), or
+        None if the file is not a sumvideo page
     """
     try:
         text = html_path.read_text(encoding='utf-8', errors='replace')
@@ -1268,7 +1298,30 @@ def read_page_info(html_path: Path) -> dict[str, str] | None:
         'creator': parser.meta.get('twitter:creator') or labelled('Creator:'),
         'published': labelled('Published:'),
         'thumbnail': "" if not poster or poster.startswith('data:') else unquote(poster),
+        'tags': [tag.strip() for tag in parser.tags if tag.strip()],
     }
+
+def index_tags(pages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """
+    Count the tags used across pages, for the index's filter links.
+
+    Tags that slugify the same way ("Cats", "cats") are counted together under
+    the first spelling seen.
+
+    Args:
+        pages: Page entries with a tag_links list of (slug, name) pairs
+
+    Returns:
+        One dictionary per tag with slug, name and count, most used first
+    """
+    names: dict[str, str] = {}
+    counts: dict[str, int] = {}
+    for page in pages:
+        for slug, name in dict(page['tag_links']).items():
+            names.setdefault(slug, name)
+            counts[slug] = counts.get(slug, 0) + 1
+    return [{'slug': slug, 'name': names[slug], 'count': counts[slug]}
+            for slug in sorted(counts, key=lambda slug: (-counts[slug], slug))]
 
 def build_index(directory: Path, base_url: str | None = None) -> Path:
     """
@@ -1290,14 +1343,19 @@ def build_index(directory: Path, base_url: str | None = None) -> Path:
             continue
         thumbnail = info['thumbnail']
         has_thumbnail = bool(thumbnail) and (directory / thumbnail).exists()
+        tag_links = [(slugify(tag), tag) for tag in info['tags'] if slugify(tag)]
         pages.append(dict(info, href=quote(info['filename']),
-                          thumbnail_src=quote(thumbnail) if has_thumbnail else ""))
+                          thumbnail_src=quote(thumbnail) if has_thumbnail else "",
+                          tag_links=tag_links,
+                          classes=' '.join(dict.fromkeys(f't-{slug}' for slug, _ in tag_links))))
     pages.sort(key=lambda page: (page['published'], page['filename']), reverse=True)
+    tags = index_tags(pages)
 
     env = Environment(autoescape=True)
     html_content = env.from_string(INDEX_TEMPLATE).render(
         site_name=SITE_NAME,
         pages=pages,
+        tags=tags,
         updated=datetime.now().astimezone().strftime("%Y-%m-%d"),
         page_url=public_url(base_url, INDEX_FILENAME) if base_url else "",
     )
@@ -1399,6 +1457,9 @@ Examples:
     parser.add_argument('--style', default=DEFAULT_STYLE,
                       choices=list(STYLES.keys()),
                       help=f'Visual style for the HTML page (default: {DEFAULT_STYLE})')
+    parser.add_argument('--tag', action='append', default=[], metavar='TAG',
+                      help='Tag the page; repeat for more tags. Tags are stored as '
+                           '<meta property="video:tag"> lines, which can be edited by hand')
     parser.add_argument('--index', action='store_true',
                       help=f'Write {INDEX_FILENAME} listing every page in the output directory '
                            '(after downloading, if a URL is given)')
@@ -1518,8 +1579,9 @@ Examples:
     # Create the HTML description page
     logger.info("Creating HTML description page...")
     base_url = get_base_url(output_dir)
+    tags = [tag.strip() for tag in args.tag if tag.strip()]
     html_path = create_html(metadata, str(video_path), str(output_dir), args.standalone, args.style,
-                            base_url=base_url)
+                            base_url=base_url, tags=tags)
     html_path = Path(html_path)  # Convert back to Path object
     
     # Determine if we should clean up files (default is yes, unless --keep-all is specified)

@@ -353,5 +353,70 @@ class TestSumVideo(unittest.TestCase):
             TestSumVideo.module.main()
 
 
+    def test_tags_written_as_video_tag_meta(self):
+        """Each tag becomes its own og video:tag line, escaped, easy to edit by hand."""
+        html_content = self._render(tags=['cats', 'Rock & Roll'])
+        self.assertIn('<meta property="video:tag" content="cats">', html_content)
+        self.assertIn('<meta property="video:tag" content="Rock &amp; Roll">', html_content)
+        self.assertNotIn('video:tag', self._render())
+
+    def test_read_page_info_returns_tags(self):
+        page = self._make_page('tagged', 'Tagged', '20250101')
+        text = page.read_text().replace(
+            '<meta property="og:site_name"',
+            '<meta property="video:tag" content="cats">\n'
+            '    <meta property="video:tag" content="Rock &amp; Roll">\n'
+            '    <meta property="og:site_name"', 1)
+        page.write_text(text)
+        info = TestSumVideo.module.read_page_info(page)
+        self.assertEqual(info['tags'], ['cats', 'Rock & Roll'])
+        plain = self._make_page('plain', 'Plain', '20250101')
+        self.assertEqual(TestSumVideo.module.read_page_info(plain)['tags'], [])
+
+    def test_index_filters_by_tag_without_javascript(self):
+        """Tag links target anchors before the list; CSS hides non-matching entries."""
+        for stem, tags in [('a', ['cats']), ('b', ['cats', 'Rock & Roll']), ('c', [])]:
+            video = Path(self.output_dir) / f'{stem}.mp4'
+            video.write_bytes(b'v')
+            meta = dict(self.sample_metadata, title=f'Video {stem}', upload_date='20250101')
+            TestSumVideo.create_html(meta, video, self.output_dir, tags=tags)
+        html_content = TestSumVideo.module.build_index(Path(self.output_dir)).read_text()
+        self.assertNotIn('<script', html_content)
+        self.assertIn('href="#tag-cats">cats</a> <span class="count">2</span>', html_content)
+        self.assertIn('href="#tag-rock-roll">Rock &amp; Roll</a> <span class="count">1</span>',
+                      html_content)
+        self.assertIn('#tag-cats:target ~ ol > li:not(.t-cats)', html_content)
+        self.assertIn('#tag-rock-roll:target ~ ol > li:not(.t-rock-roll)', html_content)
+        self.assertLess(html_content.index('id="tag-cats"'), html_content.index('<ol>'))
+        self.assertIn('<li class="t-cats t-rock-roll">', html_content)
+        self.assertIn('<li class="t-cats">', html_content)
+        self.assertIn('<li class="">', html_content)
+        self.assertEqual(html_content.count('<script'), 0)
+
+    def test_index_without_tags_has_no_tag_nav(self):
+        self._make_page('clip', 'Clip', '20250101')
+        html_content = TestSumVideo.module.build_index(Path(self.output_dir)).read_text()
+        self.assertNotIn('class="tags"', html_content)
+
+    def test_tag_option(self):
+        """`sumvideo --tag a --tag b URL` writes both tags into the page."""
+        out = Path(self.output_dir)
+
+        def fake_download(url, output_dir, *args, **kwargs):
+            video = Path(output_dir) / 'Downloaded.mp4'
+            video.write_bytes(b'video')
+            return {'title': 'Downloaded', 'upload_date': '20250101', 'uploader': 'U',
+                    'webpage_url': url, 'requested_downloads': [{'filepath': str(video)}]}
+
+        argv = ['sumvideo', '--tag', 'cats', '--tag', 'music', '-o', str(out),
+                'https://example.com/v']
+        with mock.patch.object(TestSumVideo.module.sys, 'argv', argv), \
+             mock.patch.object(TestSumVideo.module, 'download_video', fake_download), \
+             mock.patch('builtins.print'):
+            TestSumVideo.module.main()
+        page = next(p for p in out.glob('*.html') if p.name != 'index.html')
+        self.assertEqual(TestSumVideo.module.read_page_info(page)['tags'], ['cats', 'music'])
+
+
 if __name__ == '__main__':
     unittest.main()
