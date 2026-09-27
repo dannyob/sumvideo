@@ -866,6 +866,34 @@ def get_mime_type(file_extension: str) -> str:
     }
     return mime_types.get(file_extension.lower(), 'video/mp4')
 
+def video_index(url: str) -> int:
+    """
+    Which video of a multi-video post a URL points at, e.g. .../status/123/video/2.
+
+    Args:
+        url: The video URL
+
+    Returns:
+        The 1-based index from the URL, or 1 if it names none
+    """
+    match = re.search(r'/video/(\d+)/?(?:[?#]|$)', url)
+    return int(match.group(1)) if match and int(match.group(1)) > 0 else 1
+
+def downloaded_file(metadata: dict[str, Any]) -> Path | None:
+    """
+    The file yt-dlp reports it downloaded.
+
+    Args:
+        metadata: Video metadata from yt-dlp
+
+    Returns:
+        Path to the downloaded file, or None if yt-dlp didn't report one that exists
+    """
+    for download in metadata.get('requested_downloads') or []:
+        if download.get('filepath') and Path(download['filepath']).exists():
+            return Path(download['filepath'])
+    return None
+
 def download_video(url: str, output_dir: str | Path, format: str = DEFAULT_VIDEO_FORMAT, 
                   cookies_from_browser: str | None = None, cookies_file: str | None = None,
                   keep_all: bool = False) -> dict[str, Any] | None:
@@ -897,6 +925,10 @@ def download_video(url: str, output_dir: str | Path, format: str = DEFAULT_VIDEO
         'writethumbnail': True,
         # Separate video/audio streams are deleted after merging unless --keep-all
         'keepvideo': keep_all,
+        # A post with several videos is a playlist to yt-dlp; fetch just one
+        'playlist_items': str(video_index(url)),
+        # ...and write no info.json or thumbnail for the post as a whole
+        'allow_playlist_files': False,
     }
     
     # Add cookie options if provided
@@ -917,6 +949,12 @@ def download_video(url: str, output_dir: str | Path, format: str = DEFAULT_VIDEO
                 logger.error(f"Could not extract information from {url}")
                 return None
                 
+            if result.get('_type') == 'playlist' or 'entries' in result:
+                entries = [entry for entry in result.get('entries') or [] if entry]
+                if not entries:
+                    logger.error(f"No videos downloaded from {url}")
+                    return None
+                result = entries[0]
             logger.info(f"Successfully downloaded video: {result.get('title', 'Unknown')}")
             return result
     except yt_dlp.utils.DownloadError as e:
@@ -1135,7 +1173,9 @@ def create_html(metadata: dict[str, Any], video_path: str | Path, output_dir: st
     
     # For truncated titles (ending with '...'), try to use description as title if it looks more complete
     title = raw_title
-    if raw_title.endswith('...') and description and len(description.strip()) > len(raw_title):
+    # yt-dlp numbers the videos of a multi-video post ("... #1"); ignore that here
+    if (re.sub(r'\s#\d+$', '', raw_title).endswith('...') and description
+            and len(description.strip()) > len(raw_title)):
         # Use the description as the title, but clean it up
         cleaned_desc = description.strip()
         # If description is significantly longer and appears to contain the full content, use it
@@ -1581,44 +1621,15 @@ Examples:
     # Define the path for the renamed video file
     new_video_path = output_dir / new_video_filename
     
-    # Find the actual downloaded file using glob instead of manual search
-    video_files = list(output_dir.glob(f"*.{args.format}"))
-    
-    # Filter out any .info.json files that might be incorrectly matched
-    video_files = [f for f in video_files if not f.name.endswith(".info.json")]
-    
-    # Find the actual video file
-    actual_video_path = None
-    
-    if video_files:
-        actual_video_path = video_files[0]
-    
-    # Get the actual downloaded file path from the metadata
-    video_path = None
-    if metadata.get('requested_downloads'):
-        # yt-dlp stores the actual downloaded filepath in the requested_downloads
-        for download in metadata['requested_downloads']:
-            if 'filepath' in download and Path(download['filepath']).exists():
-                actual_video_path = Path(download['filepath'])
-                logger.debug(f"Found video path from metadata: {actual_video_path}")
-                video_path = actual_video_path
-                break
-    
-    # Fallback to searching if not found in metadata
-    if not video_path:
-        # Find the downloaded file in the output directory
-        video_ext = metadata.get('ext', args.format)
-        video_files = list(output_dir.glob(f"*.{video_ext}"))
-        # Filter out any .info.json files that might be incorrectly matched
-        video_files = [f for f in video_files if not f.name.endswith(".info.json")]
-        
-        if video_files:
-            actual_video_path = video_files[0]
-            video_path = actual_video_path
-        else:
-            # Last resort: use the expected filename
-            video_path = output_dir / f"{metadata.get('title', 'video')}.{args.format}"
-    
+    # Only ever use the file yt-dlp says it wrote. Guessing from the directory
+    # once renamed another page's video in a shared archive.
+    video_path = downloaded_file(metadata)
+    if video_path is None:
+        logger.error("yt-dlp did not report the file it downloaded; stopping rather than "
+                     "guessing, so no existing video gets renamed")
+        sys.exit(1)
+    logger.debug(f"Downloaded file: {video_path}")
+
     # Rename files to use the slug if they're not already using it
     if video_path and video_path.name != new_video_filename:
         try:

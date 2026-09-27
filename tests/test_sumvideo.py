@@ -247,13 +247,60 @@ class TestSumVideo(unittest.TestCase):
         """The default style should follow the system dark mode setting."""
         self.assertIn('prefers-color-scheme: dark', self._render(style='default'))
 
-    def _ydl_opts_used(self, **kwargs):
+    def _ydl_opts_used(self, url='https://example.com/v', **kwargs):
         """Run download_video with yt-dlp mocked out; return the options it was given."""
         with mock.patch.object(TestSumVideo.module.yt_dlp, 'YoutubeDL') as ydl:
             ydl.return_value.__enter__.return_value.extract_info.return_value = {'title': 't'}
-            TestSumVideo.module.download_video('https://example.com/v', self.output_dir,
-                                               **kwargs)
+            TestSumVideo.module.download_video(url, self.output_dir, **kwargs)
         return ydl.call_args.args[0]
+
+    def test_download_fetches_only_one_video_of_a_post(self):
+        """A post with several videos yields one: the one in the URL, else the first."""
+        self.assertEqual(self._ydl_opts_used()['playlist_items'], '1')
+        url = 'https://x.com/someone/status/123/video/2'
+        self.assertEqual(self._ydl_opts_used(url)['playlist_items'], '2')
+
+    def test_download_writes_no_files_for_the_whole_post(self):
+        self.assertFalse(self._ydl_opts_used()['allow_playlist_files'])
+
+    def test_truncated_title_of_a_video_in_a_post(self):
+        """yt-dlp numbers videos in a post ("... #1"); that title is still truncated."""
+        meta = dict(self.sample_metadata, title='someone - The post text is cut short... #1',
+                    description='The post text is cut short here but complete in full, '
+                                'as the whole post always is')
+        html_content = Path(TestSumVideo.create_html(meta, self.video_path,
+                                                     self.output_dir)).read_text()
+        self.assertIn('<title>The post text is cut short here but complete in full, '
+                      'as the whole post always is</title>',
+                      html_content)
+
+    def test_download_returns_the_video_not_the_playlist(self):
+        entry = {'title': 'First', 'requested_downloads': [{'filepath': '/x/first.mp4'}]}
+        playlist = {'_type': 'playlist', 'title': 'Post', 'entries': [entry]}
+        with mock.patch.object(TestSumVideo.module.yt_dlp, 'YoutubeDL') as ydl:
+            ydl.return_value.__enter__.return_value.extract_info.return_value = playlist
+            result = TestSumVideo.module.download_video('https://example.com/v', self.output_dir)
+        self.assertEqual(result['title'], 'First')
+
+    def test_main_never_takes_another_video(self):
+        """If yt-dlp doesn't say which file it wrote, stop; never rename a file already there."""
+        out = Path(self.output_dir)
+        other = out / 'someone-elses-video-0108.mp4'
+        other.write_bytes(b'not yours')
+
+        def fake_download(url, output_dir, *args, **kwargs):
+            return {'title': 'New video', 'upload_date': '20250925', 'webpage_url': url}
+
+        argv = ['sumvideo', '-o', str(out), 'https://example.com/v']
+        with mock.patch.object(TestSumVideo.module.sys, 'argv', argv), \
+             mock.patch.object(TestSumVideo.module, 'download_video', fake_download), \
+             self.assertRaises(SystemExit) as exit_:
+            TestSumVideo.module.main()
+        self.assertNotEqual(exit_.exception.code, 0)
+        self.assertEqual(other.read_bytes(), b'not yours')
+        self.assertEqual(sorted(p.name for p in out.glob('*.mp4')),
+                         ['Test Video with &amp; symbol.mp4', 'someone-elses-video-0108.mp4'])
+        self.assertEqual(list(out.glob('*.html')), [])
 
     def test_download_removes_intermediate_streams_by_default(self):
         """Separate video/audio streams should be deleted after yt-dlp merges them."""
