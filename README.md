@@ -108,6 +108,13 @@ count, and each tag links to `index.html#tag-<name>`, which shows only the
 videos with that tag. The filtering is done in CSS with `:target`, so it
 works without JavaScript and filtered views can be bookmarked.
 
+Each page also shows its tags, linked to that filtered view of the index.
+They sit between `<!-- sumvideo:tags ... -->` markers, and `--index`
+rewrites that block from the `video:tag` lines, so don't edit it directly.
+Only pages whose block is out of date are rewritten. When
+`SUMVIDEO_BASE_URL` applies the links are absolute; standalone pages made
+without it show their tags as plain text.
+
 ### Environment variables
 
 - `XDG_VIDEOS_DIR`, then `SUMVIDEO_DIR`: default output directory when `-o` isn't

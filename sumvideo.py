@@ -44,6 +44,10 @@ MAX_DESCRIPTION_LENGTH = 150
 DEFAULT_VIDEO_FORMAT = 'mp4'
 SITE_NAME = 'SumVideo Archive'
 INDEX_FILENAME = 'index.html'
+# Pages show their tags in a block that `--index` regenerates from the
+# video:tag meta lines, so those lines stay the one place tags are edited
+TAGS_START = '<!-- sumvideo:tags (generated from the video:tag lines; edit those) -->'
+TAGS_END = '<!-- /sumvideo:tags -->'
 DEFAULT_STYLE = 'newyork'
 
 # CSS Styles - modular design allows for easy style switching
@@ -582,6 +586,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         /* Base rules shared by every style */
         .description { white-space: pre-line; }
         h1, .description, .source, .archive-note { overflow-wrap: anywhere; }
+        .sumvideo-tags { font-size: 0.9em; }
 {{ styles }}
     </style>
     {% if is_standalone %}
@@ -630,6 +635,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <p class="description">{{ description }}</p>
         {% endif %}
     </div>
+    {% if tags_block %}
+    {{ tags_block }}
+    {% endif %}
     
     <div class="source">
         <p>Original source: <a href="{{ webpage_url }}" target="_blank">{{ webpage_url }}</a></p>
@@ -1031,6 +1039,74 @@ def ensure_jpeg_thumbnail(thumbnail_path: Path) -> Path:
     thumbnail_path.unlink()
     return jpeg_path
 
+def index_url(base_url: str | None) -> str:
+    """
+    Address of the index from a page in the same directory.
+
+    Args:
+        base_url: Public URL of the directory, if known
+
+    Returns:
+        The index's absolute URL, or its relative filename
+    """
+    return public_url(base_url, INDEX_FILENAME) if base_url else INDEX_FILENAME
+
+def tag_block(tags: list[str], index_href: str | None) -> str:
+    """
+    Build the visible tag list for a page, between its generated-block markers.
+
+    Args:
+        tags: The page's tags
+        index_href: Address of the index to link each tag to, or None for plain text
+
+    Returns:
+        HTML for the block; just the markers if there are no tags
+    """
+    items = []
+    for tag in tags:
+        name, slug = html.escape(tag), slugify(tag)
+        if index_href and slug:
+            items.append(f'<a href="{html.escape(index_href)}#tag-{slug}">{name}</a>')
+        else:
+            items.append(f'<span>{name}</span>')
+    # Commas, not CSS, separate the tags: older pages lack the stylesheet rules
+    inner = f'\n<p class="sumvideo-tags">Tags: {", ".join(items)}</p>\n' if items else '\n'
+    return f'{TAGS_START}{inner}{TAGS_END}'
+
+TAG_BLOCK = re.compile(r'<!-- sumvideo:tags\b.*?<!-- /sumvideo:tags -->', re.DOTALL)
+METADATA_DIV = re.compile(r'<div class="metadata">.*?</div>', re.DOTALL)
+
+def sync_tag_block(html_path: Path, tags: list[str], index_href: str) -> bool:
+    """
+    Make a page's visible tag block match its tags, rewriting the file only if needed.
+
+    Pages without a block get one after their metadata, but only if they have tags.
+
+    Args:
+        html_path: The page
+        tags: Tags from the page's video:tag lines
+        index_href: Address of the index to link tags to
+
+    Returns:
+        True if the file was changed
+    """
+    text = html_path.read_text(encoding='utf-8')
+    block = tag_block(tags, index_href)
+    if TAG_BLOCK.search(text):
+        new_text = TAG_BLOCK.sub(lambda _: block, text, count=1)
+    elif tags:
+        metadata = METADATA_DIV.search(text)
+        if not metadata:
+            logger.warning(f"No metadata block to put tags after in {html_path.name}")
+            return False
+        new_text = f"{text[:metadata.end()]}\n    {block}{text[metadata.end():]}"
+    else:
+        return False
+    if new_text == text:
+        return False
+    html_path.write_text(new_text, encoding='utf-8')
+    return True
+
 def create_html(metadata: dict[str, Any], video_path: str | Path, output_dir: str | Path,
               standalone: bool = False, style: str = DEFAULT_STYLE,
               base_url: str | None = None, tags: list[str] | None = None) -> str:
@@ -1199,6 +1275,10 @@ def create_html(metadata: dict[str, Any], video_path: str | Path, output_dir: st
         site_name=SITE_NAME,
         # The page template doesn't autoescape; tags are free text
         tags=[html.escape(tag) for tag in tags or []],
+        # A standalone page may be saved anywhere, so only link to an index
+        # whose public address is known
+        tags_block=tag_block(tags, None if standalone and not base_url
+                             else index_url(base_url)) if tags else '',
         styles=style_css  # Inject the selected style
     )
     
@@ -1343,6 +1423,8 @@ def build_index(directory: Path, base_url: str | None = None) -> Path:
             continue
         thumbnail = info['thumbnail']
         has_thumbnail = bool(thumbnail) and (directory / thumbnail).exists()
+        if sync_tag_block(html_path, info['tags'], index_url(base_url)):
+            logger.info(f"Updated tags shown on {html_path.name}")
         tag_links = [(slugify(tag), tag) for tag in info['tags'] if slugify(tag)]
         pages.append(dict(info, href=quote(info['filename']),
                           thumbnail_src=quote(thumbnail) if has_thumbnail else "",

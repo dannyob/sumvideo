@@ -418,5 +418,75 @@ class TestSumVideo(unittest.TestCase):
         self.assertEqual(TestSumVideo.module.read_page_info(page)['tags'], ['cats', 'music'])
 
 
+    def _retag(self, page, tags):
+        """Replace a page's video:tag lines, the way a person would by hand."""
+        lines = [line for line in page.read_text().splitlines(keepends=True)
+                 if 'property="video:tag"' not in line]
+        text = ''.join(lines).replace(
+            '<meta property="og:site_name"',
+            ''.join(f'<meta property="video:tag" content="{t}">\n    ' for t in tags)
+            + '<meta property="og:site_name"', 1)
+        page.write_text(text)
+
+    def test_page_shows_tags_linking_to_index(self):
+        """Tagged pages show their tags, linked to the index filtered by each."""
+        html_content = self._render(tags=['cats', 'Rock & Roll'])
+        self.assertIn('<!-- sumvideo:tags', html_content)
+        self.assertIn('<a href="index.html#tag-cats">cats</a>', html_content)
+        self.assertIn('<a href="index.html#tag-rock-roll">Rock &amp; Roll</a>', html_content)
+        self.assertLess(html_content.index('class="metadata"'),
+                        html_content.index('<!-- sumvideo:tags'))
+        self.assertNotIn('sumvideo:tags', self._render())
+
+    def test_tag_links_absolute_with_base_url(self):
+        html_content = self._render(tags=['cats'], base_url='https://example.com/v')
+        self.assertIn('<a href="https://example.com/v/index.html#tag-cats">cats</a>',
+                      html_content)
+
+    def test_standalone_tags_without_base_url_are_plain_text(self):
+        """A standalone page may end up far from any index, so don't link blindly."""
+        html_content = self._render(tags=['cats'], standalone=True)
+        self.assertIn('sumvideo-tags', html_content)
+        self.assertNotIn('index.html#tag-cats', html_content)
+
+    def test_index_rebuild_resyncs_visible_tags(self):
+        """Edit the meta lines, rebuild the index, and the visible tags follow."""
+        page = self._make_page('clip', 'Clip', '20250101')
+        self._retag(page, ['cats'])
+        TestSumVideo.module.build_index(Path(self.output_dir))
+        self.assertIn('<a href="index.html#tag-cats">cats</a>', page.read_text())
+        self._retag(page, ['dogs'])
+        TestSumVideo.module.build_index(Path(self.output_dir))
+        text = page.read_text()
+        self.assertIn('<a href="index.html#tag-dogs">dogs</a>', text)
+        self.assertNotIn('#tag-cats', text)
+        self.assertEqual(text.count('<!-- sumvideo:tags'), 1)
+        # Removing every tag empties the block but keeps its markers
+        self._retag(page, [])
+        TestSumVideo.module.build_index(Path(self.output_dir))
+        text = page.read_text()
+        self.assertIn('<!-- sumvideo:tags', text)
+        self.assertNotIn('#tag-', text)
+
+    def test_index_rebuild_leaves_up_to_date_pages_alone(self):
+        """Pages whose tag block is already right aren't rewritten (so sync stays quiet)."""
+        page = self._make_page('clip', 'Clip', '20250101')
+        self._retag(page, ['cats'])
+        TestSumVideo.module.build_index(Path(self.output_dir))
+        os.utime(page, (1_000_000_000, 1_000_000_000))
+        untagged = self._make_page('plain', 'Plain', '20250101')
+        os.utime(untagged, (1_000_000_000, 1_000_000_000))
+        TestSumVideo.module.build_index(Path(self.output_dir))
+        self.assertEqual(page.stat().st_mtime, 1_000_000_000)
+        self.assertEqual(untagged.stat().st_mtime, 1_000_000_000)
+        self.assertNotIn('sumvideo:tags', untagged.read_text())
+
+    def test_index_rebuild_uses_base_url_for_tag_links(self):
+        page = self._make_page('clip', 'Clip', '20250101')
+        self._retag(page, ['cats'])
+        TestSumVideo.module.build_index(Path(self.output_dir), base_url='https://example.com/v/')
+        self.assertIn('href="https://example.com/v/index.html#tag-cats"', page.read_text())
+
+
 if __name__ == '__main__':
     unittest.main()
