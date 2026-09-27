@@ -159,6 +159,43 @@ class TestSumVideoWeb(unittest.TestCase):
         self.assertIn('href="/sumvideo/"', page)
         self.assertIn(f'href="/sumvideo/jobs/{job_id}"', client.get('/').get_data(as_text=True))
 
+    def _archive(self):
+        """An archive directory with some tagged pages."""
+        archive = Path(self.tmp.name) / 'archive'
+        archive.mkdir()
+        for name, tags in [('a', ['music', 'ai']), ('b', ['music']), ('c', ['Rock &amp; Roll'])]:
+            metas = ''.join(f'<meta property="video:tag" content="{t}">\n' for t in tags)
+            (archive / f'{name}.html').write_text(f'<html><head>{metas}</head></html>')
+        (archive / 'index.html').write_text('<meta property="video:tag" content="ignored">')
+        return archive
+
+    def test_form_lists_archive_tags_as_checkboxes(self):
+        fake = Path(self.tmp.name) / 'sumvideo'
+        app = self.web.create_app(sumvideo_cmd=str(fake), jobs_dir=Path(self.tmp.name) / 't',
+                                  archive_dir=self._archive())
+        page = app.test_client().get('/').get_data(as_text=True)
+        self.assertIn('<input type="checkbox" name="tag" value="music">', page)
+        self.assertIn('<input type="checkbox" name="tag" value="Rock &amp; Roll">', page)
+        self.assertLess(page.index('value="music"'), page.index('value="ai"'))  # by count
+        self.assertNotIn('ignored', page)
+        self.assertIn('name="new_tags"', page)
+
+    def test_form_without_archive_still_takes_new_tags(self):
+        page = self.client.get('/').get_data(as_text=True)
+        self.assertIn('name="new_tags"', page)
+        self.assertNotIn('name="tag"', page)
+
+    def test_tags_passed_to_both_runs(self):
+        response = self.client.post('/jobs', data={
+            'url': 'https://example.com/v', 'archive': 'on',
+            'tag': ['music', 'ai'], 'new_tags': ' new one, Music ,, ai '})
+        page = self._wait('/' + response.headers['Location'])
+        calls = self.log.read_text().splitlines()
+        self.assertEqual(len(calls), 2)
+        for call in calls:
+            self.assertIn('--tag music --tag ai --tag new one ', call)
+        self.assertIn('music, ai, new one', page)
+
     def test_unknown_job_is_404(self):
         self.assertEqual(self.client.get('/jobs/nope').status_code, 404)
         self.assertEqual(self.client.get('/jobs/../../etc/passwd/page').status_code, 404)
