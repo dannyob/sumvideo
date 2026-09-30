@@ -263,6 +263,11 @@ class TestSumVideo(unittest.TestCase):
     def test_download_writes_no_files_for_the_whole_post(self):
         self.assertFalse(self._ydl_opts_used()['allow_playlist_files'])
 
+    def test_download_converts_thumbnails_to_jpeg(self):
+        """TikTok thumbnails arrive as ".image"; yt-dlp should convert every thumbnail to .jpg."""
+        self.assertIn({'key': 'FFmpegThumbnailsConvertor', 'format': 'jpg', 'when': 'before_dl'},
+                      self._ydl_opts_used().get('postprocessors', []))
+
     def test_truncated_title_of_a_video_in_a_post(self):
         """yt-dlp numbers videos in a post ("... #1"); that title is still truncated."""
         meta = dict(self.sample_metadata, title='someone - The post text is cut short... #1',

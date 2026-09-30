@@ -923,6 +923,8 @@ def download_video(url: str, output_dir: str | Path, format: str = DEFAULT_VIDEO
         'outtmpl': {'default': '%(title)s.%(ext)s'},
         'writeinfojson': True,
         'writethumbnail': True,
+        # Some sites (TikTok) serve thumbnails yt-dlp names ".image"; make them all .jpg
+        'postprocessors': [{'key': 'FFmpegThumbnailsConvertor', 'format': 'jpg', 'when': 'before_dl'}],
         # Separate video/audio streams are deleted after merging unless --keep-all
         'keepvideo': keep_all,
         # A post with several videos is a playlist to yt-dlp; fetch just one
