@@ -24,7 +24,13 @@
 - `--cookies FILE` - Path to Netscape format cookie file
 - `--tag TAG` - Tag the page (repeatable); stored as `<meta property="video:tag">` lines
 - `--index` - Write `index.html` listing every sumvideo page in the output directory
-  (URL optional: without one, only the index is rebuilt)
+  (URL optional: without one, only the index is rebuilt). Also re-syncs every page's notes block.
+- `--notes FILE` - Markdown notes (needs a URL), copied to `STEM.notes.md` beside the page and
+  rendered into a generated `sumvideo:notes` block (edit the sidecar, not the page). Optional
+  front matter: `title` (replaces h1/title/og:title/twitter:title and names the files) and
+  `creator` (shown as "Creator:"; the uploader becomes "Posted by:"). Refuses to overwrite an
+  existing, different sidecar. Re-running on a URL that already has a page updates that page
+  under its existing filename; pages are never renamed.
 
 ### Development Commands
 - **Install as tool**: `make install` or `uv tool install .`

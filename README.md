@@ -63,6 +63,8 @@ uv pip install jinja2 yt-dlp python-slugify
 - `--index`: Write `index.html` listing every SumVideo page in the output
   directory, newest first. The URL is optional with `--index`: without one,
   SumVideo just rebuilds the index.
+- `--notes FILE`: Markdown notes for the page, with optional `title:` and
+  `creator:` front matter (see Notes). Needs a URL.
 - `-v, --verbose`: Enable verbose logging for debugging
 - `-h, --help`: Show help message and exit
 
@@ -114,6 +116,45 @@ rewrites that block from the `video:tag` lines, so don't edit it directly.
 Only pages whose block is out of date are rewritten. When
 `SUMVIDEO_BASE_URL` applies the links are absolute; standalone pages made
 without it show their tags as plain text.
+
+### Notes
+
+A page can have notes: a Markdown file named `STEM.notes.md` beside
+`STEM.html`. The notes are rendered into the page between
+`<!-- sumvideo:notes ... -->` markers, after the tags and before the
+"Original source" line. The block is generated, so edit the `.notes.md` file,
+not the page. Raw HTML in the notes is escaped, not passed through.
+
+Run `sumvideo --index` to sync notes: it adds, updates or empties the block on
+every page in the directory, and rewrites only pages that changed. Deleting
+the sidecar removes the notes at the next `--index`.
+
+`--notes FILE` copies FILE to the sidecar of the page being made, so a new
+page can be archived with its notes in one step. If the sidecar already exists
+with different content, SumVideo stops with an error rather than overwrite it;
+edit the sidecar instead.
+
+The notes may start with front matter. Only `title` and `creator` are
+recognised; other keys are ignored with a warning.
+
+```markdown
+---
+title: How to fail an AI job interview
+creator: Jane Doe (@janedoe)
+---
+Reposted without credit; the original is at https://example.com/original.
+```
+
+`title` replaces the video's title in `<h1>`, `<title>`, `og:title` and
+`twitter:title`. `creator` is shown as "Creator:" and used for
+`twitter:creator`, and the uploader is then shown as "Posted by:". With no
+override the uploader is shown as "Posted by:" and there is no creator line.
+When a page is first made with `--notes` and a `title`, the filename is made
+from that title. Existing pages are never renamed.
+
+Running SumVideo again on a URL that already has a page in the output
+directory updates that page, under its existing filename, instead of making a
+second one.
 
 ### Environment variables
 
