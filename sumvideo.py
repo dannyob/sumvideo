@@ -588,12 +588,16 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     <meta property="video:tag" content="{{ tag }}">
     {% endfor %}
     <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:creator" content="{{ uploader }}">
+    <meta name="twitter:creator" content="{{ creator_meta }}">
+    <meta name="sumvideo:original-title" content="{{ original_title }}">
+    <meta name="sumvideo:original-uploader" content="{{ uploader }}">
     <style>
         /* Base rules shared by every style */
         .description { white-space: pre-line; }
         h1, .description, .source, .archive-note { overflow-wrap: anywhere; }
         .sumvideo-tags { font-size: 0.9em; }
+        .sumvideo-notes { margin: 1.5em 0; overflow-wrap: anywhere; }
+        .sumvideo-notes p { margin: 0.5em 0; }
 {{ styles }}
     </style>
     {% if is_standalone %}
@@ -635,7 +639,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     </div>
 
     <div class="metadata">
-        <p class="creator"><strong>Creator:</strong> {{ uploader }}</p>
+        {% if creator %}
+        <p class="creator"><strong>Creator:</strong> {{ creator }}</p>
+        {% endif %}
+        <p class="poster"><strong>Posted by:</strong> {{ uploader }}</p>
         <p class="published"><strong>Published:</strong> {{ upload_date }}</p>
         {% if description %}
         <p class="description-label"><strong>Description:</strong></p>
@@ -644,6 +651,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     </div>
     {% if tags_block %}
     {{ tags_block }}
+    {% endif %}
+    {% if notes_html %}
+    {{ notes_html }}
     {% endif %}
     
     <div class="source">
@@ -1209,9 +1219,33 @@ def notes_block(notes: Notes | None) -> str:
         return f'{NOTES_START}\n{NOTES_END}'
     return f'{NOTES_START}\n<section class="sumvideo-notes">\n{rendered}</section>\n{NOTES_END}'
 
+def page_title(metadata: dict[str, Any]) -> str:
+    """The cleaned display title for a video's page."""
+    raw_title = metadata.get('title', 'Untitled Video')
+    description = metadata.get('description', '')
+
+    # For truncated titles (ending with '...'), try to use description as title if it looks more complete
+    title = raw_title
+    # yt-dlp numbers the videos of a multi-video post ("... #1"); ignore that here
+    if (re.sub(r'\s#\d+$', '', raw_title).endswith('...') and description
+            and len(description.strip()) > len(raw_title)):
+        # Use the description as the title, but clean it up
+        cleaned_desc = description.strip()
+        # If description is significantly longer and appears to contain the full content, use it
+        if len(cleaned_desc) > len(raw_title) + 10:  # At least 10 chars longer than truncated title
+            title = cleaned_desc
+
+    # Clean up the title by removing hashtags while preserving the main content
+    return clean_title_hashtags(title)
+
+def page_slug(metadata: dict[str, Any]) -> str:
+    """The filename stem sumvideo gives a video's page."""
+    return generate_short_slug(page_title(metadata), metadata.get('upload_date'))
+
 def create_html(metadata: dict[str, Any], video_path: str | Path, output_dir: str | Path,
               standalone: bool = False, style: str = DEFAULT_STYLE,
-              base_url: str | None = None, tags: list[str] | None = None) -> str:
+              base_url: str | None = None, tags: list[str] | None = None,
+              html_stem: str | None = None, notes: Notes | None = None) -> str:
     """
     Create an HTML description page for the video.
 
@@ -1223,6 +1257,9 @@ def create_html(metadata: dict[str, Any], video_path: str | Path, output_dir: st
         style: Style name to use for the HTML page (default: newyork)
         base_url: Public URL of output_dir; makes og:image and og:url absolute
         tags: Tags for the page, each written as a video:tag meta line
+        html_stem: Filename (without .html) to use instead of the computed slug
+        notes: Notes whose body is shown on the page and whose title and
+            creator override the video's
 
     Returns:
         Path to the created HTML file
@@ -1232,31 +1269,19 @@ def create_html(metadata: dict[str, Any], video_path: str | Path, output_dir: st
     output_dir_obj = Path(output_dir) if isinstance(output_dir, str) else output_dir
     
     # Extract relevant metadata
-    raw_title = metadata.get('title', 'Untitled Video')
     description = metadata.get('description', '')
-    
-    # For truncated titles (ending with '...'), try to use description as title if it looks more complete
-    title = raw_title
-    # yt-dlp numbers the videos of a multi-video post ("... #1"); ignore that here
-    if (re.sub(r'\s#\d+$', '', raw_title).endswith('...') and description
-            and len(description.strip()) > len(raw_title)):
-        # Use the description as the title, but clean it up
-        cleaned_desc = description.strip()
-        # If description is significantly longer and appears to contain the full content, use it
-        if len(cleaned_desc) > len(raw_title) + 10:  # At least 10 chars longer than truncated title
-            title = cleaned_desc
-    
-    # Clean up the title by removing hashtags while preserving the main content
-    title = clean_title_hashtags(title)
+    original_title = page_title(metadata)
+    title = html.escape(notes.title) if notes and notes.title else original_title
     
     uploader = metadata.get('uploader', 'Unknown')
+    creator = html.escape(notes.creator) if notes and notes.creator else ''
     upload_date = format_date(metadata.get('upload_date', ''))
     webpage_url = metadata.get('webpage_url', '')
     
     # Create a shortened description for OG metadata
     # Only hide description if we actually used the full description as the title
     # (not just when title was cleaned of hashtags)
-    display_description = '' if title == description else description
+    display_description = '' if original_title == description else description
     short_description = display_description
     if display_description and len(display_description) > MAX_DESCRIPTION_LENGTH:
         short_description = display_description[:MAX_DESCRIPTION_LENGTH] + '...'
@@ -1340,7 +1365,7 @@ def create_html(metadata: dict[str, Any], video_path: str | Path, output_dir: st
             logger.exception("Error preparing standalone data")
     
     # Generate a shorter, meaningful slug for the filename
-    slug = generate_short_slug(title, metadata.get('upload_date'))
+    slug = html_stem or page_slug(metadata)
     html_filename = f"{slug}.html"
     html_path = output_dir_obj / html_filename
     page_url = public_url(base_url, html_filename) if base_url else ""
@@ -1361,7 +1386,11 @@ def create_html(metadata: dict[str, Any], video_path: str | Path, output_dir: st
 
     html_content = template.render(
         title=title,
+        original_title=original_title,
         uploader=uploader,
+        creator=creator,
+        creator_meta=creator or uploader,
+        notes_html=notes_block(notes) if notes else '',
         upload_date=upload_date,
         description=display_description,
         short_description=short_description,
@@ -1407,6 +1436,9 @@ class _PageInfoParser(HTMLParser):
         self.title = ""
         self.poster = ""
         self.has_archive_note = False
+        self.source = ""
+        self.video = ""
+        self._in_source = False
         self.tags: list[str] = []
         self.paragraphs: list[str] = []
         self._in_title = False
@@ -1424,14 +1456,22 @@ class _PageInfoParser(HTMLParser):
             self._in_title = True
         elif tag == 'video':
             self.poster = attributes.get('poster') or ""
+        elif tag == 'source' and not self.video:
+            self.video = attributes.get('src') or ""
+        elif tag == 'a' and self._in_source and not self.source:
+            self.source = attributes.get('href') or ""
         elif tag == 'p':
             self._paragraph = []
+        elif tag == 'div' and 'source' in (attributes.get('class') or '').split():
+            self._in_source = True
         elif tag == 'div' and 'archive-note' in (attributes.get('class') or '').split():
             self.has_archive_note = True
 
     def handle_endtag(self, tag: str) -> None:
         if tag == 'title':
             self._in_title = False
+        elif tag == 'div':
+            self._in_source = False
         elif tag == 'p' and self._paragraph is not None:
             self.paragraphs.append("".join(self._paragraph).strip())
             self._paragraph = None
@@ -1451,7 +1491,8 @@ def read_page_info(html_path: Path) -> dict[str, Any] | None:
 
     Returns:
         Dictionary with filename, title, creator, published, thumbnail (a local
-        filename, or "" if the page has none or embeds it) and tags (a list), or
+        filename, or "" if the page has none or embeds it), tags (a list),
+        source (the original link) and video (a local filename, or "" if embedded), or
         None if the file is not a sumvideo page
     """
     try:
@@ -1479,10 +1520,13 @@ def read_page_info(html_path: Path) -> dict[str, Any] | None:
     return {
         'filename': html_path.name,
         'title': parser.title.strip() or html_path.stem,
-        'creator': parser.meta.get('twitter:creator') or labelled('Creator:'),
+        'creator': parser.meta.get('twitter:creator') or labelled('Creator:')
+        or labelled('Posted by:'),
         'published': labelled('Published:'),
         'thumbnail': "" if not poster or poster.startswith('data:') else unquote(poster),
         'tags': [tag.strip() for tag in parser.tags if tag.strip()],
+        'source': parser.source,
+        'video': "" if parser.video.startswith('data:') else unquote(parser.video),
     }
 
 def index_tags(pages: list[dict[str, Any]]) -> list[dict[str, Any]]:

@@ -149,6 +149,49 @@ class TestSumVideo(unittest.TestCase):
             self.sample_metadata, self.video_path, self.output_dir, **kwargs)
         return Path(html_path).read_text(encoding='utf-8')
 
+    def test_page_shows_notes_block_before_source(self):
+        notes = TestSumVideo.module.Notes(body='Traced via [a post](https://x.com/v/1).')
+        text = self._render(notes=notes)
+        self.assertIn('<section class="sumvideo-notes">', text)
+        self.assertIn('<a href="https://x.com/v/1">a post</a>', text)
+        self.assertLess(text.index('class="metadata"'), text.index(TestSumVideo.module.NOTES_START))
+        self.assertLess(text.index(TestSumVideo.module.NOTES_START), text.index('class="source"'))
+        self.assertNotIn('sumvideo:notes', self._render())
+
+    def test_uploader_labelled_posted_by(self):
+        text = self._render()
+        self.assertIn('<strong>Posted by:</strong> Test Uploader', text)
+        self.assertNotIn('<strong>Creator:</strong>', text)
+
+    def test_overrides_reach_title_previews_and_creator(self):
+        notes = TestSumVideo.module.Notes(title='Fail "an" <AI> & job', creator='Nick Reid')
+        page = Path(TestSumVideo.create_html(self.sample_metadata, self.video_path,
+                                             self.output_dir, notes=notes))
+        text = page.read_text()
+        self.assertIn('<h1>Fail &quot;an&quot; &lt;AI&gt; &amp; job</h1>', text)
+        self.assertIn('<meta property="og:title" content="Fail &quot;an&quot; &lt;AI&gt; &amp; job">', text)
+        self.assertIn('<meta name="twitter:creator" content="Nick Reid">', text)
+        self.assertIn('<strong>Creator:</strong> Nick Reid', text)
+        self.assertIn('<strong>Posted by:</strong> Test Uploader', text)
+        info = TestSumVideo.module.read_page_info(page)
+        self.assertEqual((info['title'], info['creator']), ('Fail "an" <AI> & job', 'Nick Reid'))
+
+    def test_original_values_recorded(self):
+        text = self._render(notes=TestSumVideo.module.Notes(title='New'))
+        self.assertIn('<meta name="sumvideo:original-title" content="Test Video with &amp; symbol">', text)
+        self.assertIn('<meta name="sumvideo:original-uploader" content="Test Uploader">', text)
+
+    def test_html_stem_sets_filename(self):
+        page = TestSumVideo.create_html(self.sample_metadata, self.video_path,
+                                        self.output_dir, html_stem='chosen-0328')
+        self.assertEqual(Path(page).name, 'chosen-0328.html')
+
+    def test_read_page_info_source_and_video(self):
+        page = Path(TestSumVideo.create_html(self.sample_metadata, self.video_path, self.output_dir))
+        info = TestSumVideo.module.read_page_info(page)
+        self.assertEqual(info['source'], 'https://example.com/video?param1=value1&param2=value2')
+        self.assertEqual(info['video'], 'Test Video with &amp; symbol.mp4')
+
     THUMB_URL_NAME = 'Test%20Video%20with%20%26amp%3B%20symbol.jpg'
 
     def _write_thumbnail(self):
