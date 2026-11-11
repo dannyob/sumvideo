@@ -1768,6 +1768,35 @@ def write_index(output_dir: Path) -> None:
     if base_url:
         print(f"Index URL: {public_url(base_url, INDEX_FILENAME)}")
 
+def find_existing_page(directory: Path, metadata: dict[str, Any]) -> dict[str, Any] | None:
+    """
+    The page already made for a video, so a re-run can update it in place.
+
+    A page matches when its source link is the video's webpage_url, or contains
+    the video's id (when that is 15+ digits, as forwork/update.sh matches).
+    If several match, warns and takes the first by filename.
+
+    Returns:
+        The read_page_info dict of the page, or None
+    """
+    url = metadata.get('webpage_url')
+    video_id = str(metadata.get('id') or '')
+    long_id = video_id if re.fullmatch(r'\d{15,}', video_id) else ''
+    matches = []
+    for path in sorted(directory.glob('*.html')):
+        if path.name == INDEX_FILENAME:
+            continue
+        info = read_page_info(path)
+        if not info:
+            continue
+        source = info.get('source') or ''
+        if source and ((url and source == url) or (long_id and long_id in source)):
+            matches.append(info)
+    if len(matches) > 1:
+        logger.warning("Several pages match %s (%s); using %s",
+                       url, ", ".join(m['filename'] for m in matches), matches[0]['filename'])
+    return matches[0] if matches else None
+
 def main():
     # Parse command-line arguments
     parser = argparse.ArgumentParser(
@@ -1804,9 +1833,14 @@ Examples:
     parser.add_argument('--index', action='store_true',
                       help=f'Write {INDEX_FILENAME} listing every page in the output directory '
                            '(after downloading, if a URL is given)')
+    parser.add_argument('--notes', metavar='FILE',
+                      help='Markdown notes for the page (optional title:/creator: front matter); '
+                           'copied to STEM.notes.md beside the page, which is then the copy to edit')
     args = parser.parse_args()
     if not args.url and not args.index:
         parser.error('a video URL is required (or use --index)')
+    if args.notes and not args.url:
+        parser.error('--notes needs a video URL')
     
     # Set logging level based on verbose flag
     if args.verbose:
@@ -1833,13 +1867,6 @@ Examples:
     # Get the video title from metadata
     video_title = metadata.get('title', 'video')
     
-    # Create a shorter filename using our helper function
-    short_slug = generate_short_slug(video_title, metadata.get('upload_date'))
-    new_video_filename = f"{short_slug}.{args.format}"
-    
-    # Define the path for the renamed video file
-    new_video_path = output_dir / new_video_filename
-    
     # Only ever use the file yt-dlp says it wrote. Guessing from the directory
     # once renamed another page's video in a shared archive.
     video_path = downloaded_file(metadata)
@@ -1848,6 +1875,43 @@ Examples:
                      "guessing, so no existing video gets renamed")
         sys.exit(1)
     logger.debug(f"Downloaded file: {video_path}")
+
+    # Decide the filenames: an existing page for this video keeps its names;
+    # otherwise a notes title names the files; otherwise the upstream title does.
+    notes_in = None
+    if args.notes:
+        try:
+            notes_text = Path(args.notes).read_text()
+        except OSError as e:
+            logger.error(f"Cannot read {args.notes}: {e}")
+            sys.exit(1)
+        notes_in = parse_notes(notes_text)
+    existing = find_existing_page(output_dir, metadata)
+    if existing:
+        html_stem = Path(existing['filename']).stem
+        media_stem = Path(existing['video']).stem if existing.get('video') else html_stem
+        logger.info(f"Updating existing page {existing['filename']}")
+    elif notes_in and notes_in.title:
+        html_stem = media_stem = generate_short_slug(notes_in.title, metadata.get('upload_date'))
+    else:
+        html_stem = page_slug(metadata)
+        media_stem = generate_short_slug(video_title, metadata.get('upload_date'))
+    short_slug = media_stem
+    new_video_filename = f"{media_stem}.{args.format}"
+    new_video_path = output_dir / new_video_filename
+
+    if args.notes:
+        sidecar = output_dir / f"{html_stem}.notes.md"
+        if sidecar.exists() and sidecar.read_text() != notes_text:
+            logger.error(f"{sidecar.name} already exists with different content; "
+                         "edit that file instead of using --notes")
+            stem = video_path.stem
+            for leftover in [video_path, video_path.with_name(f"{stem}.info.json"),
+                             *thumbnail_files(output_dir, stem)]:
+                leftover.unlink(missing_ok=True)
+            sys.exit(1)
+        if not sidecar.exists():
+            sidecar.write_text(notes_text)
 
     # Rename files to use the slug if they're not already using it
     if video_path and video_path.name != new_video_filename:
@@ -1893,7 +1957,8 @@ Examples:
     base_url = get_base_url(output_dir)
     tags = [tag.strip() for tag in args.tag if tag.strip()]
     html_path = create_html(metadata, str(video_path), str(output_dir), args.standalone, args.style,
-                            base_url=base_url, tags=tags)
+                            base_url=base_url, tags=tags,
+                            html_stem=html_stem, notes=read_notes(output_dir / f"{html_stem}.html"))
     html_path = Path(html_path)  # Convert back to Path object
     
     # Determine if we should clean up files (default is yes, unless --keep-all is specified)

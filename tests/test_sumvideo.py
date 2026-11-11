@@ -514,6 +514,67 @@ class TestSumVideo(unittest.TestCase):
         self.assertEqual(TestSumVideo.module.read_page_info(page)['tags'], ['cats', 'music'])
 
 
+    def _run_main(self, *args, title='Downloaded', url='https://example.com/v', vid='1'):
+        out = Path(self.output_dir)
+
+        def fake_download(u, output_dir, *a, **kw):
+            video = Path(output_dir) / 'raw-download.mp4'
+            video.write_bytes(b'video')
+            return {'title': title, 'upload_date': '20251108', 'uploader': 'Reposter',
+                    'webpage_url': url, 'id': vid,
+                    'requested_downloads': [{'filepath': str(video)}]}
+
+        argv = ['sumvideo', '-o', str(out), *args, url]
+        with mock.patch.object(TestSumVideo.module.sys, 'argv', argv), \
+             mock.patch.object(TestSumVideo.module, 'download_video', fake_download), \
+             mock.patch('builtins.print'):
+            TestSumVideo.module.main()
+        return sorted(p.name for p in out.iterdir())
+
+    def test_notes_option_writes_sidecar_and_slug_from_title(self):
+        notes = Path(self.output_dir) / 'in.md'
+        notes.write_text('---\ntitle: How to fail\n---\nBody.')
+        names = self._run_main('--notes', str(notes), title='Bad Name')
+        self.assertIn('how-to-fail-1108.html', names)
+        self.assertIn('how-to-fail-1108.mp4', names)
+        self.assertIn('how-to-fail-1108.notes.md', names)
+        self.assertNotIn('bad-name-1108.html', names)
+
+    def test_rerun_reuses_existing_page_and_keeps_notes(self):
+        notes = Path(self.output_dir) / 'in.md'
+        notes.write_text('---\ntitle: How to fail\n---\nBody.')
+        self._run_main('--notes', str(notes), title='Bad Name')
+        names = self._run_main(title='Bad Name')
+        self.assertNotIn('bad-name-1108.html', names)
+        text = (Path(self.output_dir) / 'how-to-fail-1108.html').read_text()
+        self.assertIn('<h1>How to fail</h1>', text)
+        self.assertIn('Body.', text)
+
+    def test_notes_option_refuses_to_overwrite_different_notes(self):
+        notes = Path(self.output_dir) / 'in.md'
+        notes.write_text('---\ntitle: How to fail\n---\nBody.')
+        self._run_main('--notes', str(notes))
+        (Path(self.output_dir) / 'how-to-fail-1108.notes.md').write_text('Hand edited.')
+        with self.assertRaises(SystemExit) as exit_:
+            self._run_main('--notes', str(notes))
+        self.assertNotEqual(exit_.exception.code, 0)
+        self.assertEqual((Path(self.output_dir) / 'how-to-fail-1108.notes.md').read_text(),
+                         'Hand edited.')
+        self.assertFalse((Path(self.output_dir) / 'raw-download.mp4').exists())
+
+    def test_rerun_matches_by_video_id(self):
+        self._run_main(url='https://www.tiktok.com/@a/video/7706023765662010638',
+                       vid='7706023765662010638', title='First')
+        names = self._run_main(url='https://www.tiktok.com/@a/video/7706023765662010638?lang=en',
+                               vid='7706023765662010638', title='Second')
+        self.assertEqual([n for n in names if n.endswith('.html')], ['first-1108.html'])
+
+    def test_rerun_of_standalone_page_reuses_html_stem(self):
+        self._run_main('--standalone', title='Solo')
+        names = self._run_main('--standalone', title='Solo renamed upstream')
+        self.assertEqual([n for n in names if n.endswith('.html')], ['solo-1108.html'])
+
+
     def _retag(self, page, tags):
         """Replace a page's video:tag lines, the way a person would by hand."""
         lines = [line for line in page.read_text().splitlines(keepends=True)
