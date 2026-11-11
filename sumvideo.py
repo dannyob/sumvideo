@@ -1220,7 +1220,11 @@ def notes_block(notes: Notes | None) -> str:
     return f'{NOTES_START}\n<section class="sumvideo-notes">\n{rendered}</section>\n{NOTES_END}'
 
 NOTES_BLOCK = re.compile(r'<!-- sumvideo:notes\b.*?<!-- /sumvideo:notes -->', re.DOTALL)
-CREATOR_POSTER_LINES = re.compile(r'[ \t]*<p class="(?:creator|poster)">.*?</p>[ \t]*\n?', re.DOTALL)
+# The uploader line has been a classless paragraph labelled Creator:, then class creator, then
+# class poster labelled Posted by:, so match on the label rather than the class
+CREATOR_POSTER_LINES = re.compile(
+    r'[ \t]*<p(?: class="[^"]*")?>\s*<strong>(?:Creator|Posted by):</strong>.*?</p>[ \t]*\n?',
+    re.DOTALL)
 
 def _meta_content(text: str, attr: str, name: str) -> str | None:
     """The raw content of the first `<meta attr="name" content="...">`, or None."""

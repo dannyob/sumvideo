@@ -599,6 +599,27 @@ class TestSumVideo(unittest.TestCase):
         self.assertEqual(text.count('<strong>Creator:</strong>'), 1)
         self.assertEqual(TestSumVideo.module.read_page_info(page)['creator'], 'Nick Reid')
 
+    def test_index_converts_classless_old_creator_line(self):
+        page = self._make_page('old', 'Old', '20250101')
+        text = page.read_text()
+        text = re.sub(r'\s*<meta name="sumvideo:(original-[^>]*|)>', '', text)
+        text = re.sub(r'\s*<meta name="twitter:creator"[^>]*>', '', text)
+        text = text.replace('<strong>Posted by:</strong>', '<strong>Creator:</strong>') \
+                   .replace('<p class="poster">', '<p>')
+        page.write_text(text)
+        sidecar = page.with_suffix('.notes.md')
+        sidecar.write_text('---\ncreator: Nick Reid\n---\n')
+        TestSumVideo.module.build_index(Path(self.output_dir))
+        text = page.read_text()
+        self.assertEqual(text.count('<strong>Creator:</strong>'), 1)
+        self.assertEqual(text.count('<strong>Posted by:</strong>'), 1)
+        self.assertIn('<strong>Posted by:</strong> Test Uploader', text)
+        sidecar.unlink()
+        TestSumVideo.module.build_index(Path(self.output_dir))
+        text = page.read_text()
+        self.assertNotIn('<strong>Creator:</strong>', text)
+        self.assertEqual(text.count('<strong>Posted by:</strong> Test Uploader'), 1)
+
     def test_index_rebuild_resyncs_visible_tags(self):
         """Edit the meta lines, rebuild the index, and the visible tags follow."""
         page = self._make_page('clip', 'Clip', '20250101')
