@@ -5,6 +5,7 @@
 #   "jinja2",
 #   "yt-dlp",
 #   "python-slugify",
+#   "markdown-it-py[linkify]",
 # ]
 # ///
 

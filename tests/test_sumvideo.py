@@ -5,6 +5,7 @@
 #   "jinja2",
 #   "yt-dlp",
 #   "python-slugify",
+#   "markdown-it-py[linkify]",
 #   "pytest",
 # ]
 # ///
@@ -538,6 +539,41 @@ class TestSumVideo(unittest.TestCase):
         self._retag(page, ['cats'])
         TestSumVideo.module.build_index(Path(self.output_dir), base_url='https://example.com/v/')
         self.assertIn('href="https://example.com/v/index.html#tag-cats"', page.read_text())
+
+    def test_parse_notes_front_matter(self):
+        n = TestSumVideo.module.parse_notes(
+            '---\ntitle: How to fail\ncreator: Nick Reid (@itsnickreid)\n---\nFound via X.\n')
+        self.assertEqual((n.title, n.creator, n.body.strip()),
+                         ('How to fail', 'Nick Reid (@itsnickreid)', 'Found via X.'))
+
+    def test_parse_notes_without_front_matter(self):
+        n = TestSumVideo.module.parse_notes('Just notes.\n---\nnot front matter\n')
+        self.assertEqual((n.title, n.creator), (None, None))
+        self.assertIn('not front matter', n.body)
+
+    def test_parse_notes_ignores_unknown_keys(self):
+        with self.assertLogs(TestSumVideo.module.logger, 'WARNING'):
+            n = TestSumVideo.module.parse_notes('---\nplatform: tiktok\n---\nx')
+        self.assertIsNone(n.title)
+
+    def test_parse_notes_bom_crlf_and_empty_body(self):
+        n = TestSumVideo.module.parse_notes('\ufeff---\r\ntitle: T\r\n---\r\n')
+        self.assertEqual((n.title, n.body.strip()), ('T', ''))
+        self.assertEqual(TestSumVideo.module.notes_block(n),
+                         TestSumVideo.module.NOTES_START + '\n' + TestSumVideo.module.NOTES_END)
+
+    def test_render_notes_markdown_links_and_no_raw_html(self):
+        out = TestSumVideo.module.render_notes(
+            'Seen at https://x.com/a/status/1 and [TikTok](https://tiktok.com/@n).\n\n<script>x</script>')
+        self.assertIn('<a href="https://x.com/a/status/1">', out)
+        self.assertIn('<a href="https://tiktok.com/@n">TikTok</a>', out)
+        self.assertNotIn('<script>', out)
+
+    def test_read_notes_uses_sidecar_beside_page(self):
+        page = Path(self.output_dir) / 'clip-0101.html'
+        self.assertIsNone(TestSumVideo.module.read_notes(page))
+        (Path(self.output_dir) / 'clip-0101.notes.md').write_text('Hello')
+        self.assertEqual(TestSumVideo.module.read_notes(page).body.strip(), 'Hello')
 
 
 if __name__ == '__main__':

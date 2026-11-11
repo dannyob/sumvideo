@@ -5,6 +5,7 @@
 #   "jinja2",
 #   "yt-dlp",
 #   "python-slugify",
+#   "markdown-it-py[linkify]",
 # ]
 # ///
 
@@ -17,6 +18,7 @@ import os
 import re
 import subprocess
 import sys
+from dataclasses import dataclass
 from datetime import date, datetime
 from html.parser import HTMLParser
 from pathlib import Path
@@ -25,6 +27,7 @@ from urllib.parse import quote, unquote
 
 import yt_dlp
 from jinja2 import Environment, FileSystemLoader
+from markdown_it import MarkdownIt
 from slugify import slugify
 
 # Configure logging
@@ -48,6 +51,10 @@ INDEX_FILENAME = 'index.html'
 # video:tag meta lines, so those lines stay the one place tags are edited
 TAGS_START = '<!-- sumvideo:tags (generated from the video:tag lines; edit those) -->'
 TAGS_END = '<!-- /sumvideo:tags -->'
+# Pages also show free-form notes, rendered from a Markdown file beside the page
+NOTES_START = '<!-- sumvideo:notes (generated from the .notes.md file beside this page; edit that) -->'
+NOTES_END = '<!-- /sumvideo:notes -->'
+NOTES_KEYS = ('title', 'creator')
 DEFAULT_STYLE = 'newyork'
 
 # CSS Styles - modular design allows for easy style switching
@@ -1146,6 +1153,61 @@ def sync_tag_block(html_path: Path, tags: list[str], index_href: str) -> bool:
         return False
     html_path.write_text(new_text, encoding='utf-8')
     return True
+
+@dataclass
+class Notes:
+    """A page's notes sidecar: optional front matter fields plus a Markdown body."""
+    title: str | None = None
+    creator: str | None = None
+    body: str = ""
+
+def parse_notes(text: str) -> Notes:
+    """
+    Split a notes file into front matter and Markdown body.
+
+    Front matter is optional: a first line of exactly `---`, simple `key: value`
+    lines, then a closing `---`. Only title and creator are recognised; other
+    keys are warned about and ignored.
+    """
+    text = text.removeprefix('\ufeff').replace('\r\n', '\n')
+    lines = text.split('\n')
+    if lines[0] != '---' or '---' not in lines[1:]:
+        return Notes(body=text)
+    end = lines.index('---', 1)
+    fields: dict[str, str] = {}
+    for line in lines[1:end]:
+        if not line.strip():
+            continue
+        key, sep, value = line.partition(':')
+        key = key.strip().lower()
+        if not sep:
+            logger.warning(f"Ignoring notes front matter line without a colon: {line!r}")
+        elif key in NOTES_KEYS:
+            fields[key] = value.strip()
+        else:
+            logger.warning(f"Ignoring unknown notes front matter key: {key!r}")
+    return Notes(title=fields.get('title'), creator=fields.get('creator'),
+                 body='\n'.join(lines[end + 1:]))
+
+def read_notes(html_path: Path) -> Notes | None:
+    """Read the notes sidecar beside a page, or None if there isn't one."""
+    sidecar = html_path.with_suffix('.notes.md')
+    if not sidecar.is_file():
+        return None
+    return parse_notes(sidecar.read_text(encoding='utf-8'))
+
+def render_notes(body: str) -> str:
+    """Render notes Markdown to HTML (raw HTML is not passed through); '' if blank."""
+    if not body.strip():
+        return ''
+    return MarkdownIt('commonmark', {'html': False, 'linkify': True}).enable('linkify').render(body)
+
+def notes_block(notes: Notes | None) -> str:
+    """The marked block of rendered notes for a page; just the markers if no notes body."""
+    rendered = render_notes(notes.body) if notes else ''
+    if not rendered:
+        return f'{NOTES_START}\n{NOTES_END}'
+    return f'{NOTES_START}\n<section class="sumvideo-notes">\n{rendered}</section>\n{NOTES_END}'
 
 def create_html(metadata: dict[str, Any], video_path: str | Path, output_dir: str | Path,
               standalone: bool = False, style: str = DEFAULT_STYLE,

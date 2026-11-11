@@ -16,6 +16,7 @@ dependencies = [
     "jinja2",
     "yt-dlp", 
     "python-slugify",
+    "markdown-it-py[linkify]",
 ]
 keywords = ["video", "download", "summary", "youtube"]
 classifiers = [
