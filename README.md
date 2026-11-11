@@ -39,7 +39,7 @@ python -m venv .venv
 source .venv/bin/activate
 
 # Install dependencies
-uv pip install jinja2 yt-dlp python-slugify
+uv pip install jinja2 yt-dlp python-slugify 'markdown-it-py[linkify]'
 ```
 
 ## Usage
@@ -219,7 +219,7 @@ python -m venv .venv
 source .venv/bin/activate
 
 # Install dependencies
-uv pip install jinja2 yt-dlp python-slugify
+uv pip install jinja2 yt-dlp python-slugify 'markdown-it-py[linkify]'
 ```
 
 ### Testing
@@ -262,6 +262,7 @@ SumVideo uses the following Python packages:
 - **jinja2**: HTML template rendering
 - **yt-dlp**: Video downloading from various platforms
 - **python-slugify**: URL-friendly filename generation
+- **markdown-it-py**: Markdown rendering for page notes
 
 ## License
 

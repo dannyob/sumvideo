@@ -34,7 +34,7 @@
 
 ### Development Commands
 - **Install as tool**: `make install` or `uv tool install .`
-- **Install dependencies**: `uv pip install jinja2 yt-dlp python-slugify`
+- **Install dependencies**: `uv pip install jinja2 yt-dlp python-slugify 'markdown-it-py[linkify]'`
 - **Lint**: `make lint` or `ruff check sumvideo.py run_tests.py tests/ web/`
 - **Type check**: `make typecheck` or `mypy --follow-untyped-imports sumvideo.py`
 - **Run both**: `make check`
