@@ -1523,6 +1523,11 @@ def create_html(metadata: dict[str, Any], video_path: str | Path, output_dir: st
         styles=style_css  # Inject the selected style
     )
     
+    # Write the metadata lines exactly as a later --index sync would, so it
+    # finds nothing to rewrite
+    if notes:
+        html_content = apply_overrides(html_content, notes)
+
     # Write the HTML file
     try:
         html_path.write_text(html_content, encoding='utf-8')
@@ -1681,9 +1686,12 @@ def build_index(directory: Path, base_url: str | None = None) -> Path:
         has_thumbnail = bool(thumbnail) and (directory / thumbnail).exists()
         if sync_tag_block(html_path, info['tags'], index_url(base_url)):
             logger.info(f"Updated tags shown on {html_path.name}")
-        if sync_notes(html_path):
-            logger.info(f"Updated notes shown on {html_path.name}")
-            info = read_page_info(html_path) or info
+        try:
+            if sync_notes(html_path):
+                logger.info(f"Updated notes shown on {html_path.name}")
+                info = read_page_info(html_path) or info
+        except (OSError, UnicodeDecodeError) as e:
+            logger.warning(f"Skipping notes for {html_path.name}: {e}")
         tag_links = [(slugify(tag), tag) for tag in info['tags'] if slugify(tag)]
         pages.append(dict(info, href=quote(info['filename']),
                           thumbnail_src=quote(thumbnail) if has_thumbnail else "",
@@ -1855,6 +1863,16 @@ Examples:
         write_index(output_dir)
         return
     
+    # Read the notes first, so a bad file stops the run before anything is downloaded
+    notes_in = None
+    if args.notes:
+        try:
+            notes_text = Path(args.notes).read_text(encoding='utf-8')
+        except (OSError, UnicodeDecodeError) as e:
+            logger.error(f"Cannot read {args.notes}: {e}")
+            sys.exit(1)
+        notes_in = parse_notes(notes_text)
+
     # Download the video
     logger.info(f"Downloading video from {args.url}...")
     metadata = download_video(args.url, output_dir, args.format, args.cookies_from_browser,
@@ -1878,14 +1896,6 @@ Examples:
 
     # Decide the filenames: an existing page for this video keeps its names;
     # otherwise a notes title names the files; otherwise the upstream title does.
-    notes_in = None
-    if args.notes:
-        try:
-            notes_text = Path(args.notes).read_text()
-        except OSError as e:
-            logger.error(f"Cannot read {args.notes}: {e}")
-            sys.exit(1)
-        notes_in = parse_notes(notes_text)
     existing = find_existing_page(output_dir, metadata)
     if existing:
         html_stem = Path(existing['filename']).stem
@@ -1902,16 +1912,20 @@ Examples:
 
     if args.notes:
         sidecar = output_dir / f"{html_stem}.notes.md"
-        if sidecar.exists() and sidecar.read_text() != notes_text:
+        if sidecar.exists() and sidecar.read_text(encoding='utf-8') != notes_text:
             logger.error(f"{sidecar.name} already exists with different content; "
                          "edit that file instead of using --notes")
             stem = video_path.stem
+            # yt-dlp may have returned the existing page's own files; keep those
+            existing_stem = Path(existing['video']).stem if existing and existing.get('video') else None
             for leftover in [video_path, video_path.with_name(f"{stem}.info.json"),
                              *thumbnail_files(output_dir, stem)]:
+                if video_path == new_video_path or (existing_stem and leftover.name.startswith(f"{existing_stem}.")):
+                    continue
                 leftover.unlink(missing_ok=True)
             sys.exit(1)
         if not sidecar.exists():
-            sidecar.write_text(notes_text)
+            sidecar.write_text(notes_text, encoding='utf-8')
 
     # Rename files to use the slug if they're not already using it
     if video_path and video_path.name != new_video_filename:
@@ -2001,7 +2015,8 @@ Examples:
     logger.info(f"HTML page saved to: {html_path}")
     
     # Print final status for user
-    print(f"\nSuccessfully downloaded and processed: {video_title}")
+    shown_title = notes.title if (notes := read_notes(html_path)) and notes.title else video_title
+    print(f"\nSuccessfully downloaded and processed: {shown_title}")
     print(f"HTML page created: {html_path}")
     if base_url:
         print(f"Public URL: {public_url(base_url, html_path.name)}")

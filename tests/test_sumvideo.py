@@ -754,6 +754,86 @@ class TestSumVideo(unittest.TestCase):
         (Path(self.output_dir) / 'clip-0101.notes.md').write_text('Hello')
         self.assertEqual(TestSumVideo.module.read_notes(page).body.strip(), 'Hello')
 
+    def test_index_survives_unreadable_sidecar(self):
+        bad = self._make_page('bad', 'Bad', '20250101')
+        bad.with_suffix('.notes.md').write_bytes(b'\xff\xfe not utf-8')
+        self._make_page('good', 'Good', '20250102')
+        with self.assertLogs(level='WARNING') as logs:
+            TestSumVideo.module.build_index(Path(self.output_dir))
+        self.assertTrue(any('bad' in line for line in logs.output))
+        index = (Path(self.output_dir) / 'index.html').read_text()
+        self.assertIn('Good', index)
+        self.assertIn('Bad', index)
+
+    def test_notes_file_unreadable_stops_before_download(self):
+        out = Path(self.output_dir)
+        for notes in (out / 'missing.md', out / 'binary.md'):
+            if notes.name == 'binary.md':
+                notes.write_bytes(b'\xff\xfe')
+            argv = ['sumvideo', '-o', str(out), '--notes', str(notes), 'https://example.com/v']
+            with mock.patch.object(TestSumVideo.module.sys, 'argv', argv), \
+                 mock.patch.object(TestSumVideo.module, 'download_video') as download, \
+                 self.assertRaises(SystemExit) as exit_:
+                TestSumVideo.module.main()
+            self.assertNotEqual(exit_.exception.code, 0)
+            download.assert_not_called()
+
+    def test_notes_refusal_keeps_existing_media_with_same_name(self):
+        out = Path(self.output_dir)
+        notes = out / 'in.md'
+        notes.write_text('---\ntitle: clip\n---\nBody.')
+        # Existing page named clip.*; yt-dlp's raw name is also clip.mp4.
+        video = out / 'clip.mp4'
+        video.write_bytes(b'video')
+        (out / 'clip.jpg').write_bytes(b'\xff\xd8\xff jpeg')
+        meta = {'title': 'clip', 'uploader': 'U', 'upload_date': '',
+                'webpage_url': 'https://example.com/v', 'id': '1'}
+        TestSumVideo.create_html(meta, video, self.output_dir)
+        (out / 'clip.notes.md').write_text('Hand edited.')
+
+        def fake_download(u, output_dir, *a, **kw):
+            return dict(meta, requested_downloads=[{'filepath': str(video)}])
+
+        argv = ['sumvideo', '-o', str(out), '--notes', str(notes), 'https://example.com/v']
+        with mock.patch.object(TestSumVideo.module.sys, 'argv', argv), \
+             mock.patch.object(TestSumVideo.module, 'download_video', fake_download), \
+             mock.patch('builtins.print'), self.assertRaises(SystemExit):
+            TestSumVideo.module.main()
+        self.assertTrue((out / 'clip.mp4').exists())
+        self.assertTrue((out / 'clip.jpg').exists())
+
+    def test_create_html_with_notes_is_stable_under_index(self):
+        out = Path(self.output_dir)
+        video = out / 'clip.mp4'
+        video.write_bytes(b'video')
+        meta = dict(self.sample_metadata, title='Clip', upload_date='20250101')
+        notes = TestSumVideo.module.parse_notes('---\ntitle: Better\ncreator: Real\n---\nHi')
+        page = Path(TestSumVideo.create_html(meta, video, self.output_dir, notes=notes))
+        page.with_suffix('.notes.md').write_text('---\ntitle: Better\ncreator: Real\n---\nHi')
+        os.utime(page, (1_000_000_000, 1_000_000_000))
+        TestSumVideo.module.build_index(out)
+        self.assertEqual(page.stat().st_mtime, 1_000_000_000)
+
+    def test_final_message_shows_effective_title(self):
+        notes = Path(self.output_dir) / 'in.md'
+        notes.write_text('---\ntitle: How to fail\n---\nBody.')
+        out = Path(self.output_dir)
+
+        def fake_download(u, output_dir, *a, **kw):
+            video = Path(output_dir) / 'raw-download.mp4'
+            video.write_bytes(b'video')
+            return {'title': 'Bad Name', 'upload_date': '20251108', 'uploader': 'R',
+                    'webpage_url': u, 'id': '1',
+                    'requested_downloads': [{'filepath': str(video)}]}
+
+        argv = ['sumvideo', '-o', str(out), '--notes', str(notes), 'https://example.com/v']
+        with mock.patch.object(TestSumVideo.module.sys, 'argv', argv), \
+             mock.patch.object(TestSumVideo.module, 'download_video', fake_download), \
+             mock.patch('builtins.print') as printed:
+            TestSumVideo.module.main()
+        said = ' '.join(str(c.args[0]) for c in printed.call_args_list if c.args)
+        self.assertIn('processed: How to fail', said)
+
 
 if __name__ == '__main__':
     unittest.main()
