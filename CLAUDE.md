@@ -27,7 +27,7 @@
   (URL optional: without one, only the index is rebuilt). Also re-syncs every page's notes block.
 - `--notes FILE` - Markdown notes (needs a URL), copied to `STEM.notes.md` beside the page and
   rendered into a generated `sumvideo:notes` block (edit the sidecar, not the page). Optional
-  front matter: `title` (replaces h1/title/og:title/twitter:title and names the files) and
+  front matter: `title` (replaces h1/title/og:title, and twitter:title if present, and names the files) and
   `creator` (shown as "Creator:"; the uploader becomes "Posted by:"). Refuses to overwrite an
   existing, different sidecar. Re-running on a URL that already has a page updates that page
   under its existing filename; pages are never renamed.

@@ -123,7 +123,9 @@ A page can have notes: a Markdown file named `STEM.notes.md` beside
 `STEM.html`. The notes are rendered into the page between
 `<!-- sumvideo:notes ... -->` markers, after the tags and before the
 "Original source" line. The block is generated, so edit the `.notes.md` file,
-not the page. Raw HTML in the notes is escaped, not passed through.
+not the page. Raw HTML in the notes is escaped, not passed through. The
+`.notes.md` file sits in the output directory, so it is published along with
+the page if that directory is served.
 
 Run `sumvideo --index` to sync notes: it adds, updates or empties the block on
 every page in the directory, and rewrites only pages that changed. Deleting
@@ -145,8 +147,8 @@ creator: Jane Doe (@janedoe)
 Reposted without credit; the original is at https://example.com/original.
 ```
 
-`title` replaces the video's title in `<h1>`, `<title>`, `og:title` and
-`twitter:title`. `creator` is shown as "Creator:" and used for
+`title` replaces the video's title in `<h1>`, `<title>`, `og:title` (and `twitter:title`, if the page has one). `creator` is shown as
+"Creator:" and used for
 `twitter:creator`, and the uploader is then shown as "Posted by:". With no
 override the uploader is shown as "Posted by:" and there is no creator line.
 When a page is first made with `--notes` and a `title`, the filename is made
