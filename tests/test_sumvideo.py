@@ -545,6 +545,60 @@ class TestSumVideo(unittest.TestCase):
         self.assertIn('sumvideo-tags', html_content)
         self.assertNotIn('index.html#tag-cats', html_content)
 
+    def test_index_inserts_updates_and_clears_notes(self):
+        page = self._make_page('clip', 'Clip', '20250101')
+        sidecar = page.with_suffix('.notes.md')
+        sidecar.write_text('---\ntitle: Better\ncreator: Real Person\n---\nFirst.')
+        TestSumVideo.module.build_index(Path(self.output_dir))
+        text = page.read_text()
+        self.assertIn('First.', text)
+        self.assertIn('<h1>Better</h1>', text)
+        self.assertIn('<strong>Posted by:</strong> Test Uploader', text)
+        index = (Path(self.output_dir) / 'index.html').read_text()
+        self.assertIn('Better', index)
+        self.assertIn('Real Person', index)
+        sidecar.write_text('Second.')
+        TestSumVideo.module.build_index(Path(self.output_dir))
+        text = page.read_text()
+        self.assertIn('Second.', text)
+        self.assertNotIn('First.', text)
+        self.assertIn('<h1>Clip</h1>', text)
+        self.assertEqual(text.count(TestSumVideo.module.NOTES_START), 1)
+        sidecar.unlink()
+        TestSumVideo.module.build_index(Path(self.output_dir))
+        text = page.read_text()
+        self.assertIn(TestSumVideo.module.NOTES_START, text)
+        self.assertNotIn('sumvideo-notes"', text)
+
+    def test_index_leaves_pages_without_notes_alone(self):
+        page = self._make_page('plain', 'Plain', '20250101')
+        os.utime(page, (1_000_000_000, 1_000_000_000))
+        TestSumVideo.module.build_index(Path(self.output_dir))
+        self.assertEqual(page.stat().st_mtime, 1_000_000_000)
+
+    def test_index_notes_sync_is_idempotent(self):
+        page = self._make_page('clip', 'Clip', '20250101')
+        page.with_suffix('.notes.md').write_text('---\ncreator: X\n---\nHi')
+        TestSumVideo.module.build_index(Path(self.output_dir))
+        os.utime(page, (1_000_000_000, 1_000_000_000))
+        TestSumVideo.module.build_index(Path(self.output_dir))
+        self.assertEqual(page.stat().st_mtime, 1_000_000_000)
+
+    def test_index_converts_old_page_creator_line(self):
+        page = self._make_page('old', 'Old', '20250101')
+        text = page.read_text()
+        text = re.sub(r'\s*<meta name="sumvideo:original-[^>]*>', '', text)
+        text = text.replace('<strong>Posted by:</strong>', '<strong>Creator:</strong>') \
+                   .replace('class="poster"', 'class="creator"')
+        page.write_text(text)
+        page.with_suffix('.notes.md').write_text('---\ncreator: Nick Reid\n---\n')
+        TestSumVideo.module.build_index(Path(self.output_dir))
+        text = page.read_text()
+        self.assertIn('<strong>Creator:</strong> Nick Reid', text)
+        self.assertIn('<strong>Posted by:</strong> Test Uploader', text)
+        self.assertEqual(text.count('<strong>Creator:</strong>'), 1)
+        self.assertEqual(TestSumVideo.module.read_page_info(page)['creator'], 'Nick Reid')
+
     def test_index_rebuild_resyncs_visible_tags(self):
         """Edit the meta lines, rebuild the index, and the visible tags follow."""
         page = self._make_page('clip', 'Clip', '20250101')

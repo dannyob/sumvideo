@@ -1219,6 +1219,110 @@ def notes_block(notes: Notes | None) -> str:
         return f'{NOTES_START}\n{NOTES_END}'
     return f'{NOTES_START}\n<section class="sumvideo-notes">\n{rendered}</section>\n{NOTES_END}'
 
+NOTES_BLOCK = re.compile(r'<!-- sumvideo:notes\b.*?<!-- /sumvideo:notes -->', re.DOTALL)
+CREATOR_POSTER_LINES = re.compile(r'[ \t]*<p class="(?:creator|poster)">.*?</p>[ \t]*\n?', re.DOTALL)
+
+def _meta_content(text: str, attr: str, name: str) -> str | None:
+    """The raw content of the first `<meta attr="name" content="...">`, or None."""
+    match = re.search(rf'<meta {attr}="{re.escape(name)}" content="(.*?)">', text, re.DOTALL)
+    return match.group(1) if match else None
+
+def _set_meta_content(text: str, attr: str, name: str, value: str) -> str:
+    """Replace the content of the first matching meta tag, if there is one."""
+    return re.sub(rf'(<meta {attr}="{re.escape(name)}" content=").*?(">)',
+                  lambda m: f'{m.group(1)}{value}{m.group(2)}', text, count=1, flags=re.DOTALL)
+
+def apply_overrides(text: str, notes: Notes | None) -> str:
+    """
+    Make a page's title and creator lines match its notes' front matter.
+
+    The page's original title and uploader are kept in sumvideo:original-* metas
+    (added here to older pages), so an override can be removed again later.
+    Values already in the page are raw HTML text and are written back as they
+    are; overrides are escaped.
+
+    Args:
+        text: The page's HTML
+        notes: The page's notes, or None if it has none
+
+    Returns:
+        The updated HTML
+    """
+    original_title = _meta_content(text, 'name', 'sumvideo:original-title')
+    original_uploader = _meta_content(text, 'name', 'sumvideo:original-uploader')
+    has_originals = original_title is not None
+    if original_title is None:
+        match = re.search(r'<title>(.*?)</title>', text, re.DOTALL)
+        original_title = match.group(1) if match else ''
+    if original_uploader is None:
+        match = METADATA_DIV.search(text)
+        labelled = re.search(r'<strong>(?:Creator|Posted by):</strong>\s*(.*?)</p>',
+                             match.group(0), re.DOTALL) if match else None
+        original_uploader = (_meta_content(text, 'name', 'twitter:creator')
+                             or (labelled.group(1).strip() if labelled else ''))
+    if not has_originals:
+        metas = (f'\n    <meta name="sumvideo:original-title" content="{original_title}">'
+                 f'\n    <meta name="sumvideo:original-uploader" content="{original_uploader}">')
+        site = re.search(r'<meta property="og:site_name" content=".*?">', text, re.DOTALL)
+        at = site.end() if site else text.find('</head>')
+        if at >= 0:
+            text = text[:at] + metas + text[at:]
+
+    title = html.escape(notes.title) if notes and notes.title else original_title
+    creator = html.escape(notes.creator) if notes and notes.creator else None
+
+    text = re.sub(r'(<title>).*?(</title>)', lambda m: f'{m.group(1)}{title}{m.group(2)}',
+                  text, count=1, flags=re.DOTALL)
+    text = re.sub(r'(<h1>).*?(</h1>)', lambda m: f'{m.group(1)}{title}{m.group(2)}',
+                  text, count=1, flags=re.DOTALL)
+    text = _set_meta_content(text, 'property', 'og:title', title)
+    text = _set_meta_content(text, 'name', 'twitter:title', title)
+    text = _set_meta_content(text, 'name', 'twitter:creator', creator or original_uploader)
+
+    lines = ''
+    if creator:
+        lines += f'\n        <p class="creator"><strong>Creator:</strong> {creator}</p>'
+    lines += f'\n        <p class="poster"><strong>Posted by:</strong> {original_uploader}</p>'
+    metadata = METADATA_DIV.search(text)
+    if metadata:
+        div = CREATOR_POSTER_LINES.sub('', metadata.group(0))
+        div = div.replace('<div class="metadata">', f'<div class="metadata">{lines}', 1)
+        text = text[:metadata.start()] + div + text[metadata.end():]
+    return text
+
+def sync_notes(html_path: Path) -> bool:
+    """
+    Make a page's notes block, title and creator lines match its notes sidecar.
+
+    Pages with no sidecar and no notes block are not touched. A page whose
+    sidecar has gone gets an empty block and its original title and uploader.
+
+    Returns:
+        True if the file was changed
+    """
+    notes = read_notes(html_path)
+    text = html_path.read_text(encoding='utf-8')
+    if notes is None and not NOTES_BLOCK.search(text):
+        return False
+    block = notes_block(notes)
+    if NOTES_BLOCK.search(text):
+        new_text = NOTES_BLOCK.sub(lambda _: block, text, count=1)
+    else:
+        tags = TAG_BLOCK.search(text)
+        source = text.find('<div class="source">')
+        if tags:
+            new_text = f"{text[:tags.end()]}\n    {block}{text[tags.end():]}"
+        elif source >= 0:
+            new_text = f"{text[:source]}{block}\n    {text[source:]}"
+        else:
+            logger.warning(f"No place to put notes in {html_path.name}")
+            return False
+    new_text = apply_overrides(new_text, notes)
+    if new_text == text:
+        return False
+    html_path.write_text(new_text, encoding='utf-8')
+    return True
+
 def page_title(metadata: dict[str, Any]) -> str:
     """The cleaned display title for a video's page."""
     raw_title = metadata.get('title', 'Untitled Video')
@@ -1573,6 +1677,9 @@ def build_index(directory: Path, base_url: str | None = None) -> Path:
         has_thumbnail = bool(thumbnail) and (directory / thumbnail).exists()
         if sync_tag_block(html_path, info['tags'], index_url(base_url)):
             logger.info(f"Updated tags shown on {html_path.name}")
+        if sync_notes(html_path):
+            logger.info(f"Updated notes shown on {html_path.name}")
+            info = read_page_info(html_path) or info
         tag_links = [(slugify(tag), tag) for tag in info['tags'] if slugify(tag)]
         pages.append(dict(info, href=quote(info['filename']),
                           thumbnail_src=quote(thumbnail) if has_thumbnail else "",
