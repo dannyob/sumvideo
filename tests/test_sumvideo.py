@@ -351,6 +351,37 @@ class TestSumVideo(unittest.TestCase):
                          ['Test Video with &amp; symbol.mp4', 'someone-elses-video-0108.mp4'])
         self.assertEqual(list(out.glob('*.html')), [])
 
+    def _main_with_failing_download(self, failure):
+        """Run main with a download that writes partial files and then fails."""
+        out = Path(self.output_dir)
+        before = sorted(p.name for p in out.iterdir())
+
+        def fake_download(url, output_dir, *args, **kwargs):
+            for name in ['Uploader - Title.info.json', 'Uploader - Title.jpg',
+                         'Uploader - Title.mp4.part']:
+                (Path(output_dir) / name).write_bytes(b'partial')
+            if isinstance(failure, BaseException):
+                raise failure
+            return failure
+
+        argv = ['sumvideo', '-o', str(out), 'https://example.com/v']
+        with mock.patch.object(TestSumVideo.module.sys, 'argv', argv), \
+             mock.patch.object(TestSumVideo.module, 'download_video', fake_download):
+            try:
+                TestSumVideo.module.main()
+            except (SystemExit, KeyboardInterrupt):
+                pass
+        return before, sorted(p.name for p in out.iterdir())
+
+    def test_failed_download_leaves_nothing_in_output_dir(self):
+        """A download that fails partway must not leave partial files where they get published."""
+        before, after = self._main_with_failing_download(None)
+        self.assertEqual(after, before)
+
+    def test_interrupted_download_leaves_nothing_in_output_dir(self):
+        before, after = self._main_with_failing_download(KeyboardInterrupt())
+        self.assertEqual(after, before)
+
     def test_download_removes_intermediate_streams_by_default(self):
         """Separate video/audio streams should be deleted after yt-dlp merges them."""
         self.assertFalse(self._ydl_opts_used().get('keepvideo', False))
@@ -520,6 +551,8 @@ class TestSumVideo(unittest.TestCase):
         def fake_download(u, output_dir, *a, **kw):
             video = Path(output_dir) / 'raw-download.mp4'
             video.write_bytes(b'video')
+            (Path(output_dir) / 'raw-download.info.json').write_text('{}')
+            (Path(output_dir) / 'raw-download.webp').write_bytes(b'RIFF webp')
             return {'title': title, 'upload_date': '20251108', 'uploader': 'Reposter',
                     'webpage_url': url, 'id': vid,
                     'requested_downloads': [{'filepath': str(video)}]}
@@ -560,7 +593,7 @@ class TestSumVideo(unittest.TestCase):
         self.assertNotEqual(exit_.exception.code, 0)
         self.assertEqual((Path(self.output_dir) / 'how-to-fail-1108.notes.md').read_text(),
                          'Hand edited.')
-        self.assertFalse((Path(self.output_dir) / 'raw-download.mp4').exists())
+        self.assertEqual(list(Path(self.output_dir).glob('raw-download.*')), [])
 
     def test_rerun_matches_by_video_id(self):
         self._run_main(url='https://www.tiktok.com/@a/video/7706023765662010638',

@@ -16,8 +16,10 @@ import json
 import logging
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from datetime import date, datetime
 from html.parser import HTMLParser
@@ -1873,59 +1875,61 @@ Examples:
             sys.exit(1)
         notes_in = parse_notes(notes_text)
 
-    # Download the video
-    logger.info(f"Downloading video from {args.url}...")
-    metadata = download_video(args.url, output_dir, args.format, args.cookies_from_browser,
-                              args.cookies, keep_all=args.keep_all)
-    
-    if metadata is None:
-        logger.error("Download failed. Exiting.")
-        sys.exit(1)
-    
-    # Get the video title from metadata
-    video_title = metadata.get('title', 'video')
-    
-    # Only ever use the file yt-dlp says it wrote. Guessing from the directory
-    # once renamed another page's video in a shared archive.
-    video_path = downloaded_file(metadata)
-    if video_path is None:
-        logger.error("yt-dlp did not report the file it downloaded; stopping rather than "
-                     "guessing, so no existing video gets renamed")
-        sys.exit(1)
-    logger.debug(f"Downloaded file: {video_path}")
+    # Download into a scratch directory and move the files into the output
+    # directory only once yt-dlp has finished. The output directory may be
+    # published as it changes, so a failed, refused or interrupted run must
+    # leave nothing there.
+    with tempfile.TemporaryDirectory(prefix='sumvideo-') as staging_name:
+        staging = Path(staging_name)
+        logger.info(f"Downloading video from {args.url}...")
+        metadata = download_video(args.url, staging, args.format, args.cookies_from_browser,
+                                  args.cookies, keep_all=args.keep_all)
 
-    # Decide the filenames: an existing page for this video keeps its names;
-    # otherwise a notes title names the files; otherwise the upstream title does.
-    existing = find_existing_page(output_dir, metadata)
-    if existing:
-        html_stem = Path(existing['filename']).stem
-        media_stem = Path(existing['video']).stem if existing.get('video') else html_stem
-        logger.info(f"Updating existing page {existing['filename']}")
-    elif notes_in and notes_in.title:
-        html_stem = media_stem = generate_short_slug(notes_in.title, metadata.get('upload_date'))
-    else:
-        html_stem = page_slug(metadata)
-        media_stem = generate_short_slug(video_title, metadata.get('upload_date'))
-    short_slug = media_stem
-    new_video_filename = f"{media_stem}.{args.format}"
-    new_video_path = output_dir / new_video_filename
-
-    if args.notes:
-        sidecar = output_dir / f"{html_stem}.notes.md"
-        if sidecar.exists() and sidecar.read_text(encoding='utf-8') != notes_text:
-            logger.error(f"{sidecar.name} already exists with different content; "
-                         "edit that file instead of using --notes")
-            stem = video_path.stem
-            # yt-dlp may have returned the existing page's own files; keep those
-            existing_stem = Path(existing['video']).stem if existing and existing.get('video') else None
-            for leftover in [video_path, video_path.with_name(f"{stem}.info.json"),
-                             *thumbnail_files(output_dir, stem)]:
-                if video_path == new_video_path or (existing_stem and leftover.name.startswith(f"{existing_stem}.")):
-                    continue
-                leftover.unlink(missing_ok=True)
+        if metadata is None:
+            logger.error("Download failed. Exiting.")
             sys.exit(1)
-        if not sidecar.exists():
-            sidecar.write_text(notes_text, encoding='utf-8')
+
+        # Get the video title from metadata
+        video_title = metadata.get('title', 'video')
+
+        # Only ever use the file yt-dlp says it wrote. Guessing from the directory
+        # once renamed another page's video in a shared archive.
+        video_path = downloaded_file(metadata)
+        if video_path is None:
+            logger.error("yt-dlp did not report the file it downloaded; stopping rather than "
+                         "guessing")
+            sys.exit(1)
+        logger.debug(f"Downloaded file: {video_path}")
+
+        # Decide the filenames: an existing page for this video keeps its names;
+        # otherwise a notes title names the files; otherwise the upstream title does.
+        existing = find_existing_page(output_dir, metadata)
+        if existing:
+            html_stem = Path(existing['filename']).stem
+            media_stem = Path(existing['video']).stem if existing.get('video') else html_stem
+            logger.info(f"Updating existing page {existing['filename']}")
+        elif notes_in and notes_in.title:
+            html_stem = media_stem = generate_short_slug(notes_in.title, metadata.get('upload_date'))
+        else:
+            html_stem = page_slug(metadata)
+            media_stem = generate_short_slug(video_title, metadata.get('upload_date'))
+        short_slug = media_stem
+        new_video_filename = f"{media_stem}.{args.format}"
+        new_video_path = output_dir / new_video_filename
+
+        if args.notes:
+            sidecar = output_dir / f"{html_stem}.notes.md"
+            if sidecar.exists() and sidecar.read_text(encoding='utf-8') != notes_text:
+                logger.error(f"{sidecar.name} already exists with different content; "
+                             "edit that file instead of using --notes")
+                sys.exit(1)
+
+        for staged in staging.iterdir():
+            shutil.move(str(staged), str(output_dir / staged.name))
+        video_path = output_dir / video_path.name
+
+    if args.notes and not sidecar.exists():
+        sidecar.write_text(notes_text, encoding='utf-8')
 
     # Rename files to use the slug if they're not already using it
     if video_path and video_path.name != new_video_filename:
